@@ -2,6 +2,7 @@
 """Draw what the AR glasses would show, from nothing but the AR WebSocket feed.
 
 Left is the minimap: the grid, the drone and every tracked person with their head.
+A person no longer where they were last seen is drawn pale, with how long ago.
 Right is the wallhack view of someone standing at --viewer: each person's box and
 head box projected into their sight, through walls, with the distance.
 
@@ -27,6 +28,11 @@ VIEW_W, VIEW_H, VIEW_HFOV = 640, 400, math.radians(60)
 EYE_HEIGHT = 1.7
 GRID_COLOURS = np.array([[235, 235, 235], [40, 40, 40], [150, 150, 150]], dtype=np.uint8)
 PERSON, HEAD, DRONE, WEARER = (0, 90, 255), (0, 220, 255), (200, 80, 0), (60, 160, 60)
+LOST = (140, 140, 200)
+
+
+def colour(target: dict) -> tuple[int, int, int]:
+    return LOST if target["status"] == "lost" else PERSON
 
 
 def minimap(frame: dict, viewer: tuple[float, float, float]) -> np.ndarray:
@@ -56,9 +62,9 @@ def minimap(frame: dict, viewer: tuple[float, float, float]) -> np.ndarray:
         arrow(d["x"], d["y"], d["yaw"], DRONE)
     arrow(*viewer, WEARER)
     for target in frame["targets"]:
-        cv2.circle(image, px(target["x"], target["y"]), 5, PERSON, -1)
+        cv2.circle(image, px(target["x"], target["y"]), 5, colour(target), -1)
         cv2.putText(image, str(target["id"]), px(target["x"] + 0.3, target["y"] + 0.3),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, PERSON, 1)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, colour(target), 1)
         if "head" in target:
             cv2.circle(image, px(target["head"]["x"], target["head"]["y"]), 2, HEAD, -1)
     return image
@@ -91,7 +97,7 @@ def wallhack(frame: dict, viewer: tuple[float, float, float]) -> np.ndarray:
 
     labels: list[tuple[int, int, int, int]] = []
     for target in sorted(frame["targets"], key=lambda t: -math.dist((t["x"], t["y"]), (vx, vy))):
-        depth = box(target["x"], target["y"], target["z"], 0.5, target["h"], PERSON)
+        depth = box(target["x"], target["y"], target["z"], 0.5, target["h"], colour(target))
         if depth is None:
             continue
         if "head" in target:
@@ -99,6 +105,8 @@ def wallhack(frame: dict, viewer: tuple[float, float, float]) -> np.ndarray:
             box(head["x"], head["y"], head["z"], head["size"], head["size"], HEAD)
         u, v, _ = project(target["x"], target["y"], target["z"] + target["h"] / 2)
         text = f"#{target['id']} {math.dist((target['x'], target['y']), (vx, vy)):.1f} m"
+        if target["status"] == "lost":
+            text += f", {target['age']:.0f} s ago"
         (w, h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
         x, y = int(u) - w // 2, int(v) - 20
         # Move up past every label already drawn that it would overlap.
@@ -106,7 +114,7 @@ def wallhack(frame: dict, viewer: tuple[float, float, float]) -> np.ndarray:
                   for lx, ly, lw, lh in labels):
             y -= h + 4
         labels.append((x, y, w, h))
-        cv2.putText(image, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.45, PERSON, 1)
+        cv2.putText(image, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.45, colour(target), 1)
     cv2.putText(image, f"{len(frame['targets'])} people", (10, 20),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
     return image

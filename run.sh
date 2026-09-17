@@ -10,6 +10,8 @@
 #   ./run.sh explore [args] arm, take off and sweep the aisles
 #   ./run.sh score [args]   compare the people found with where they really are
 #   ./run.sh smoke          check a running sim against the topic contract
+#   ./run.sh clearance      closest the drone gets to anything, from ground truth
+#   ./run.sh walk [args]    walk a person to a new spot in a running sim
 #   ./run.sh demo [args]    colour and depth side by side from a running sim
 #   ./run.sh preview [args] what the AR glasses would draw, from the AR feed
 #   ./run.sh shell          interactive shell
@@ -37,6 +39,8 @@ case "${cmd}" in
     explore) exec_in "./scripts/explore.py $*" ;;
     score) exec_in "./scripts/score_search.py $*" ;;
     smoke) exec_in "./scripts/smoke_test.py $*" ;;
+    clearance) exec_in "./scripts/clearance.py $*" ;;
+    walk)  exec_in "./scripts/walk_person.py $*" ;;
     demo)  exec_in "./scripts/camera_demo.py $*" ;;
     preview) exec_in "./scripts/ar_preview.py $*" ;;
     shell) docker compose exec -u ubuntu sim bash -l ;;

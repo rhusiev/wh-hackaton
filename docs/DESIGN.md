@@ -108,7 +108,7 @@ thrust-to-weight 3.1, hover at 32% of full throttle.
 | `/oak/detections_2d` | `vision_msgs/Detection2DArray`, `person` and `head` boxes in colour pixels, a person and their head share an id |
 | `/oak/detection_markers` | `visualization_msgs/MarkerArray`, for RViz |
 | `/scan` | `sensor_msgs/LaserScan` from the depth, relayed to `/mavros/obstacle/send` for ArduPilot |
-| `/map` | `nav_msgs/OccupancyGrid` at 0.2 m, from `scripts/grid_mapper.py` using the true pose, or from RTAB-Map with `slam:=true` |
+| `/map` | `nav_msgs/OccupancyGrid` at 0.2 m, from `scripts/grid_mapper.py` using the true pose (a cell hit often enough clears ten times slower, so thin rack uprights stay), or from RTAB-Map with `slam:=true` |
 | `ws://<host>:8790` | the AR payload, 10 Hz JSON |
 | `/mavros/state`, `/mavros/local_position/pose`, … | the usual MAVROS surface |
 
@@ -139,18 +139,35 @@ This is the part the idea actually needs, and it is four pieces:
    `worlds/warehouse_targets.json` instead and keeps what the camera could see.
 3. **Targets → tracks.** `scripts/ar_bridge.py` transforms detections into the
    map frame and hands them to a tracker (`scripts/tracker.py`). Each sighting
-   joins the nearest track of its label within 1 m, or starts a new one. Two
-   tracks that drift within 1 m of each other are merged. A "person" whose top is
+   joins the nearest track of its label within 1 m, or starts a new one. In one
+   frame each track takes at most one sighting, closest first. A sighting more
+   than 0.5 m from its track is a step, and the track moves halfway to it. Closer
+   ones are averaged, which cancels the stereo noise. So a person walking in view
+   is followed: at 4 detector frames a second a walker moves 0.25 m per frame. Two tracks that
+   drift within 1 m of each other are merged. A "person" whose top is
    above 2.3 m is dropped. Each track carries a confidence, kept as log-odds
    (a sum that maps to 0-1 through a sigmoid):
    - A sighting adds 0.5.
    - A frame that misses the track subtracts 0.35. It only counts when the track
-     is within 8 m (`miss_range`), inside the image and not hidden behind the map.
-     So a person behind a rack loses nothing.
-   - Past 2.0, with at least 6 sightings, the track is confirmed and sent as a
-     target. It is unconfirmed again below 0.0, and deleted at -2.0.
-   Unconfirmed tracks are published on `/people/candidates` for the explorer to
-   look at more closely. This is the point of the
+     is inside the image from feet to head and not hidden behind the map, and
+     within 8 m (`miss_range`) for a candidate or 6 m (`lost_range`) for a
+     confirmed person. From 2.8 m up, feet leave the frame closer than about
+     4.2 m. So a person behind a rack loses nothing. The shorter range is there
+     because the 2D map can show a clear line that a rack really blocks: in test
+     runs a person standing in a gap between racks was marked lost from 7 m.
+   - A track has one of three statuses. A candidate is not sure yet. Past 2.0,
+     with at least 6 sightings, it is confirmed and sent as a target. A candidate
+     is deleted at -2.0.
+   - A confirmed person who falls below 0.0 is lost: they are no longer where they
+     were last seen. A lost person keeps their last position and is still sent,
+     with `"status": "lost"` and how long ago they were seen (`"age"`). Seen again
+     near there, back at 2.0, they are confirmed. A new person confirmed where a
+     lost person could have walked takes over their id: 1 m plus 1 m per second
+     since the lost person was seen, up to 5 m. A lost person is forgotten after
+     120 s (`lost_timeout`).
+   Every track, candidates included, is published on `/people/tracks` once a
+   second, as the same JSON list. That is how the explorer knows what to look at
+   more closely. This is the point of the
    whole thing: a person seen once down an aisle stays on the minimap after the
    drone has flown past, which is what "бачити людину за стінкою" means.
 4. **Tracks → Spectacles.** The same node serves a WebSocket on port 8790 at
@@ -159,7 +176,8 @@ This is the part the idea actually needs, and it is four pieces:
    ```json
    {"t": 41.2,
     "drone": {"x": -13.4, "y": 0.1, "z": 2.5, "yaw": 0.02},
-    "targets": [{"id": 0, "label": "person", "x": -9.0, "y": 0.0, "z": 0.8,
+    "targets": [{"id": 0, "label": "person", "status": "confirmed",
+                 "x": -9.0, "y": 0.0, "z": 0.8,
                  "h": 1.6, "score": 0.78, "age": 1.3, "hits": 12,
                  "confidence": 0.95,
                  "head": {"x": -9.0, "y": 0.0, "z": 1.5, "size": 0.25}}],
@@ -169,15 +187,18 @@ This is the part the idea actually needs, and it is four pieces:
 
    Metres in the map frame, so the Lens only has to scale and rotate. `"head"`
    is missing when no head was seen. `./run.sh preview` draws this payload the
-   way the glasses would.
+   way the glasses would, with lost people pale.
 
 Fly with:
 
 ```bash
-./run.sh explore --altitude 2.5        # lawnmower over all five lanes
+./run.sh explore --altitude 2.8        # lawnmower over all five lanes
 ./run.sh explore --lanes 2             # just the first two, for a quick demo
 ./run.sh explore --strategy frontier   # no known layout, explore the map's unknown edges
+./run.sh explore --strategy watch      # frontier, then keep everyone found in view
 ./run.sh score                         # found / missed / false against the true positions
+./run.sh clearance                     # closest the drone gets to anything, Ctrl-C for the summary
+./run.sh walk person_1 1.5 5.0         # walk a person to a new spot, to test tracking
 ```
 
 Frontier exploration (`scripts/frontier.py`) works like this. A frontier is a
@@ -189,8 +210,8 @@ space. A frontier it has visited or failed to reach is skipped within 1.5 m. It
 stops when no frontier is left or after `--max-time` (600 s).
 
 Between legs it takes a closer look at candidates below 0.9 confidence, nearest
-first, at most twice each (`--no-inspect` turns this off). It picks a spot 3.5 m
-from the candidate (or 2.5 m or 4.9 m) that it can reach and that has a clear line
+first, at most twice each (`--no-inspect` turns this off). It picks a spot 5 m
+from the candidate (or 3.5 m or 7 m) that it can reach and that has a clear line
 to them on the map. It flies there, faces them and hovers 3 s. A real person keeps
 being detected and gets confirmed. A false one keeps being missed and is deleted.
 
@@ -213,6 +234,30 @@ with a head. False people went away in steps:
    targets. person_3 now had 83 sightings instead of 6. 3 of the looks found no
    clear viewpoint, because the candidate was still in unknown map
 
+`--strategy watch` explores the same way, then keeps the people it found in
+view (`scripts/watch.py`). It splits them between as few stations as it can,
+picked by greedy set cover. A station is a reachable spot on a 1 m lattice plus a
+heading that has a person 1.5-7 m away, inside the camera's field of view and in
+clear line of sight on the map. It flies the stations in a loop and hovers 5 s
+(`--dwell`) at each:
+
+1. A person the station should have seen but did not is looked at from 5 m.
+   If they are gone, the tracker marks them lost
+2. A lost person is looked for where they were last seen, then with four
+   quarter-turns there
+3. Whenever the confirmed people change or one moves more than 1 m, the
+   stations are planned again. A station it could not reach is left out
+
+`./run.sh clearance` measures from ground truth how close the drone gets to the
+box collisions in the world. At 2.5 m altitude a test run touched rack decks 4
+times, because a deck at flight height is edge-on to the camera and missing from
+the map. At 2.8 m it touched rack uprights 5 times, because beams passing beside
+a 0.1 m upright cleared its cell. With slow clearing of well-hit cells there were
+0 contacts, closest 0.15 m. In the same run, three people walked 3-11.5 m during
+watch (`./run.sh walk`) and all three were followed to their new spots, with 0
+false targets. One person standing still behind a rack was still marked lost
+from a gap the 2D map shows as clear, and not found again by the search.
+
 To move this to the real aircraft, run with `detector:=none` and start
 `depthai_ros_driver` instead. It publishes the same `Detection3DArray`, so
 `ar_bridge.py` and the Lens do not change.
@@ -227,10 +272,10 @@ each one can be replaced without touching the others.
 | Detector node | publishes `/oak/spatial_detections` (and `/oak/detections_2d`), person and head share an id | `person_detector.py`, `spatial_detector.py` | `detector:=none` and run your own node, e.g. `depthai_ros_driver` |
 | Detector network | `person_network.PersonNetwork`: called with an RGB image, returns `Person(box, score, head)` | `person_network:PoseNetwork` | parameter `network` (built with `model`, `threads`, `min_score`, `min_keypoint`), or only `model` for other YOLO-pose weights |
 | Mapper | publishes `/map` as `nav_msgs/OccupancyGrid` in `map` | `grid_mapper.py`, RTAB-Map with `slam:=true` | `mapper:=false` and run your own node |
-| Tracker | `tracker.Tracker`: `update(sightings, now, visible)`, `targets(now)` and `candidates(now)` | `tracker:NearestTracker` | parameter `tracker` (built with `merge_radius`, `min_hits`, `max_top`, `timeout`) |
+| Tracker | `tracker.Tracker`: `update(sightings, now, visible)` and `tracks(now)` | `tracker:NearestTracker` | parameter `tracker` (built with `merge_radius`, `min_hits`, `max_top`, `lost_timeout`) |
 | AR server | serves the JSON above on port 8790 | `ar_bridge.py` | `ar:=false` and serve your own |
-| Exploration | a class built from the parsed arguments with `run(flight)`, optional static `add_arguments(parser)` | `sweep`, `frontier` | `./run.sh explore --strategy my_search.py:MySearch` |
-| Flight | `flight.Flight`: `here`, `heading`, `grid`, `fly_to`, `turn`, over MAVROS in GUIDED | `flight.py` | subclass it for another autopilot link; strategies do not change |
+| Exploration | a class built from the parsed arguments with `run(flight)`, optional static `add_arguments(parser)` | `sweep`, `frontier`, `watch` | `./run.sh explore --strategy my_search.py:MySearch` |
+| Flight | `flight.Flight`: `here`, `heading`, `grid`, `people`, `fly_to`, `turn`, over MAVROS in GUIDED | `flight.py` | subclass it for another autopilot link; strategies do not change |
 
 Parameters are set by starting the node yourself with its launch part off:
 

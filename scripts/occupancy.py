@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -41,3 +42,10 @@ class Grid:
             return False
         cells = self.cells[rows, cols]
         return bool(((cells >= 0) & (cells < OCCUPIED)).all())
+
+    def sees(self, eye: tuple[float, float], target: tuple[float, float]) -> bool:
+        """A clear line up to 0.6 m short of target, whose own cells may be its body."""
+        distance = math.dist(eye, target)
+        keep = max(0.0, 1 - 0.6 / distance) if distance else 0.0
+        return self.clear(eye, (eye[0] + (target[0] - eye[0]) * keep,
+                                eye[1] + (target[1] - eye[1]) * keep))

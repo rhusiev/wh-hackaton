@@ -10,18 +10,21 @@ Payload, all lengths in metres in the map frame:
 
     {"t": 1789594325.2,
      "drone": {"x": -13.4, "y": 0.1, "z": 2.0, "yaw": 0.02},
-     "targets": [{"id": 0, "label": "person", "x": -9.0, "y": 0.0, "z": 0.81, "h": 1.62,
+     "targets": [{"id": 0, "label": "person", "status": "confirmed", "x": -9.0, "y": 0.0, "z": 0.81, "h": 1.62,
                   "head": {"x": -9.0, "y": 0.02, "z": 1.5, "size": 0.22},
                   "score": 0.78, "confidence": 0.95, "age": 1.3, "hits": 12}],
      "map": {"res": 0.2, "w": 200, "h": 200, "x0": -20.0, "y0": -20.0,
              "cells": "<base64 of w*h bytes, 0 free / 1 occupied / 2 unknown>"}}
 
 A target is a box standing on the floor: centre x, y, z and height h. "head" is
-present once the detector has seen a head for it. "map" is present only while
+present once the detector has seen a head for it. "status" is "confirmed", or
+"lost" for a person no longer where they were last seen, "age" seconds ago. "map" is present only while
 something publishes /map.
 
 The fusing is tracker.py's NearestTracker; the tracker parameter ("module:Class" or
-"path/to/file.py:Class") swaps it for anything with the same update and targets.
+"path/to/file.py:Class") swaps it for anything with the same update and tracks.
+Every track, candidates included, also goes to /people/tracks as the same JSON
+list, for an explorer that wants a closer look.
 """
 
 from __future__ import annotations
@@ -39,7 +42,8 @@ from rclpy.node import Node
 from tf2_ros import Buffer, TransformListener
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo
-from vision_msgs.msg import Detection3D, Detection3DArray, ObjectHypothesisWithPose
+from std_msgs.msg import String
+from vision_msgs.msg import Detection3DArray
 
 from geometry import quat_to_matrix, yaw
 from occupancy import OCCUPIED, UNKNOWN, Grid
@@ -58,26 +62,29 @@ class ArBridge(Node):
             ("body_frame", "base_link"),
             ("tracker", "tracker:NearestTracker"),
             ("merge_radius", 1.0),
-            ("track_timeout", 0.0),
+            # A lost person is forgotten after this long unseen.
+            ("lost_timeout", 120.0),
             # About 1.5 s in view at 4 Hz; stray depth splits of a real person rarely reach it.
             ("min_hits", 6),
             # Nobody's head is higher than this above the floor.
             ("max_top", 2.3),
-            # A track closer than this, in frame and not behind a wall, should be detected.
+            # A candidate closer than this, in frame and not behind a wall, should be detected.
             ("miss_range", 8.0),
+            # The same for a confirmed person, who is only lost when missed from up close.
+            ("lost_range", 6.0),
         ])
-        self.miss_range = self._p("miss_range")
         self.map_frame, self.body_frame = self._p("map_frame"), self._p("body_frame")
         self.tracker: Tracker = load(self._p("tracker"))(
             merge_radius=self._p("merge_radius"), min_hits=self._p("min_hits"),
-            max_top=self._p("max_top"), timeout=self._p("track_timeout"))
+            max_top=self._p("max_top"), miss_range=self._p("miss_range"),
+            lost_range=self._p("lost_range"), lost_timeout=self._p("lost_timeout"))
 
         self.lock = threading.Lock()
         self.grid: dict | None = None
         self.occupancy: Grid | None = None
         self.info: CameraInfo | None = None
         self.last_grid = 0.0
-        self.last_candidates = 0.0
+        self.last_tracks = 0.0
 
         self.tf_buffer = Buffer()
         TransformListener(self.tf_buffer, self)
@@ -88,7 +95,7 @@ class ArBridge(Node):
         self.create_subscription(OccupancyGrid, "/map", self.on_map, 1)
         self.create_subscription(CameraInfo, "/camera/color/camera_info",
                                  lambda msg: setattr(self, "info", msg), qos_profile_sensor_data)
-        self.candidates = self.create_publisher(Detection3DArray, "/people/candidates", 1)
+        self.tracks_out = self.create_publisher(String, "/people/tracks", 1)
 
     def _p(self, name: str):
         return self.get_parameter(name).value
@@ -130,33 +137,17 @@ class ArBridge(Node):
         now = self.now()
         with self.lock:
             self.tracker.update(list(sightings.values()), now, view.visible if view else _never)
-            candidates = self.tracker.candidates(now)
-        if now - self.last_candidates >= MAP_PERIOD:
-            self.last_candidates = now
-            self.publish_candidates(candidates)
+            tracks = self.tracker.tracks(now)
+        if now - self.last_tracks >= MAP_PERIOD:
+            self.last_tracks = now
+            self.tracks_out.publish(String(data=json.dumps(tracks, separators=(",", ":"))))
 
     def view(self, rot: np.ndarray, trans: np.ndarray) -> CameraView | None:
         if self.info is None:
             return None
         k = self.info.k
         return CameraView(rot, trans, (k[0], k[4], k[2], k[5]), (self.info.width, self.info.height),
-                          self.occupancy, self.miss_range)
-
-    def publish_candidates(self, candidates: list[dict]) -> None:
-        """For an explorer that wants a closer look: map frame, score is the confidence."""
-        out = Detection3DArray()
-        out.header.frame_id = self.map_frame
-        out.header.stamp = self.get_clock().now().to_msg()
-        for c in candidates:
-            det = Detection3D(id=str(c["id"]))
-            hypothesis = ObjectHypothesisWithPose()
-            hypothesis.hypothesis.class_id = c["label"]
-            hypothesis.hypothesis.score = c["confidence"]
-            det.results.append(hypothesis)
-            det.bbox.center.position.x, det.bbox.center.position.y = c["x"], c["y"]
-            det.bbox.center.position.z = c["z"]
-            out.detections.append(det)
-        self.candidates.publish(out)
+                          self.occupancy)
 
     def on_map(self, msg: OccupancyGrid) -> None:
         now = self.now()
@@ -191,13 +182,13 @@ class ArBridge(Node):
             pass
 
         with self.lock:
-            payload["targets"] = self.tracker.targets(now)
+            payload["targets"] = [t for t in self.tracker.tracks(now) if t["status"] != "candidate"]
             if self.grid is not None:
                 payload["map"] = self.grid
         return json.dumps(payload, separators=(",", ":"))
 
 
-def _never(_xyz: np.ndarray) -> bool:
+def _never(_xyz: np.ndarray, _max_range: float) -> bool:
     return False
 
 

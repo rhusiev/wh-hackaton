@@ -1,15 +1,25 @@
 """Trackers: turn per-frame sightings in the map frame into people that persist.
 
 A tracker gets the sightings of one frame with update(), along with what the
-camera could see in that frame. It reports the people worth showing with
-targets() and the ones it is still unsure of with candidates(). ar_bridge.py only
-depends on those three calls, so any class with them works.
+camera could see in that frame. tracks() reports every track with its status, and
+ar_bridge.py only depends on those two calls, so any class with them works.
 
 NearestTracker keeps a confidence per track as log-odds. A sighting raises it. A
 frame where the track was in plain view, close and unoccluded, but not detected
-lowers it. A track is shown once it has min_hits sightings and enough confidence,
-and dropped once the misses outweigh the sightings. So a closer look settles a
-candidate either way.
+lowers it; the whole person, feet to head, has to be in frame. A track goes through three statuses:
+
+- candidate: not sure yet. It is confirmed once it has min_hits sightings and
+  enough confidence, and deleted once the misses outweigh the sightings
+- confirmed: a person. Misses from up close, within lost_range, make them lost.
+  Farther misses do not count for them: the map may show a clear view that a
+  rack blocks, and a person standing still must not be lost for it
+- lost: a person who is no longer where they were last seen. They keep their last
+  position, get confirmed again when seen near it, and are deleted after
+  lost_timeout
+
+A person walking in view is followed frame by frame. One who walked away unseen
+shows up as a new candidate; once confirmed within walking distance of a lost
+person, it takes over their id.
 """
 
 from __future__ import annotations
@@ -24,9 +34,12 @@ import numpy as np
 HIT = 0.5
 MISS = 0.35
 CONFIRM = 2.0            # with min_hits, about 6 clean sightings
-UNCONFIRM = 0.0          # a shown track is hidden again below this
-REJECT = -2.0            # and deleted below this
+UNCONFIRM = 0.0          # a confirmed track is lost below this
+REJECT = -2.0            # and a candidate deleted
 LOG_ODDS_MAX = 6.0
+WALK_SPEED = 1.0         # m/s, how far an unseen person may have gone
+MAX_WALK = 5.0           # m, beyond which a new person is someone else
+MOVED = 0.5              # m, a sighting this far off is a step, not stereo noise
 
 
 @dataclass
@@ -40,34 +53,34 @@ class Sighting:
 
 class Tracker(Protocol):
     def update(self, sightings: list[Sighting], now: float,
-               visible: Callable[[np.ndarray], bool]) -> None:
-        """visible(xyz) says whether this frame should have detected something at xyz."""
+               visible: Callable[[np.ndarray, float], bool]) -> None:
+        """visible(xyz, max_range) says whether this frame should have detected something at xyz."""
         ...
 
-    def targets(self, now: float) -> list[dict]:
-        """The AR payload's "targets": id, label, x, y, z, h, score, confidence, age, hits, head."""
+    def tracks(self, now: float) -> list[dict]:
+        """id, label, status, x, y, z, h, score, confidence, age, hits and head per track."""
         ...
 
-    def candidates(self, now: float) -> list[dict]:
-        """Tracks that may be people but are not shown yet, in the same form."""
-        ...
+
+STATUSES = ("confirmed", "lost", "candidate")
 
 
 class Track:
     __slots__ = ("id", "label", "xyz", "height", "head", "score", "hits", "last_seen", "belief",
-                 "confirmed")
+                 "status")
 
     def __init__(self, track_id: int, sighting: Sighting, now: float) -> None:
         self.id, self.label = track_id, sighting.label
         self.xyz, self.height, self.head = sighting.xyz, sighting.height, sighting.head
         self.score, self.hits, self.last_seen = sighting.score, 1, now
-        self.belief, self.confirmed = HIT, False
+        self.belief, self.status = HIT, "candidate"
 
     def update(self, sighting: Sighting, now: float) -> None:
-        # Running mean: repeated looks at the same person cancel the stereo noise.
         self.hits += 1
         self.belief = min(self.belief + HIT, LOG_ODDS_MAX)
-        weight = min(self.hits, 20)
+        # Running mean for a standing person, but a step is followed at once.
+        moved = np.linalg.norm(sighting.xyz[:2] - self.xyz[:2]) > MOVED
+        weight = 2 if moved else min(self.hits, 20)
         self.xyz = self.xyz + (sighting.xyz - self.xyz) / weight
         self.height += (sighting.height - self.height) / weight
         if sighting.head is not None:
@@ -86,12 +99,13 @@ class Track:
         self.score = max(self.score, other.score)
         self.hits += other.hits
         self.belief = min(max(self.belief, other.belief), LOG_ODDS_MAX)
-        self.confirmed |= other.confirmed
+        self.status = min(self.status, other.status, key=STATUSES.index)
         self.last_seen = max(self.last_seen, other.last_seen)
 
     def payload(self, now: float) -> dict:
         x, y, z = (round(float(c), 3) for c in self.xyz)
-        target = {"id": self.id, "label": self.label, "x": x, "y": y, "z": z,
+        target = {"id": self.id, "label": self.label, "status": self.status,
+                  "x": x, "y": y, "z": z,
                   "h": round(self.height, 3), "score": round(self.score, 3),
                   "confidence": round(1 / (1 + math.exp(-self.belief)), 3),
                   "age": round(now - self.last_seen, 2), "hits": self.hits}
@@ -102,49 +116,84 @@ class Track:
 
 
 class NearestTracker:
-    """Each sighting joins the nearest track of its label within merge_radius, or starts one."""
+    """Sightings join the nearest track of their label within merge_radius, or start one."""
 
-    def __init__(self, merge_radius: float, min_hits: int, max_top: float, timeout: float) -> None:
-        self.merge_radius, self.min_hits = merge_radius, min_hits
-        self.max_top, self.timeout = max_top, timeout
-        self.tracks: list[Track] = []
+    def __init__(self, merge_radius: float, min_hits: int, max_top: float, miss_range: float,
+                 lost_range: float, lost_timeout: float) -> None:
+        self.merge_radius, self.min_hits, self.max_top = merge_radius, min_hits, max_top
+        self.miss_range, self.lost_range, self.lost_timeout = miss_range, lost_range, lost_timeout
+        self._tracks: list[Track] = []
         self.next_id = 0
 
     def update(self, sightings: list[Sighting], now: float,
-               visible: Callable[[np.ndarray], bool]) -> None:
-        seen = {self.absorb(s, now) for s in sightings if s.xyz[2] + s.height / 2 <= self.max_top}
-        for track in self.tracks:
-            if track not in seen and visible(track.xyz):
-                track.belief -= MISS
-        for track in self.tracks:
-            if track.hits >= self.min_hits and track.belief >= CONFIRM:
-                track.confirmed = True
-            elif track.belief < UNCONFIRM:
-                track.confirmed = False
-        self.tracks = [t for t in self.tracks if t.belief > REJECT]
+               visible: Callable[[np.ndarray, float], bool]) -> None:
+        seen = self.associate([s for s in sightings if s.xyz[2] + s.height / 2 <= self.max_top], now)
+        for track in self._tracks:
+            max_range = self.miss_range if track.status == "candidate" else self.lost_range
+            if track not in seen and all(visible(track.xyz + [0, 0, dz], max_range)
+                                         for dz in (-track.height / 2, track.height / 2)):
+                track.belief = max(track.belief - MISS, REJECT)
+        for track in seen:
+            self.merge_into(track)
+        for track in list(self._tracks):
+            if track.status == "candidate" and track.belief >= CONFIRM and track.hits >= self.min_hits:
+                self.confirm(track, now)
+            elif track.status == "lost" and track.belief >= CONFIRM:
+                track.status = "confirmed"
+            elif track.status == "confirmed" and track.belief < UNCONFIRM:
+                track.status = "lost"
+        self._tracks = [t for t in self._tracks if self.alive(t, now)]
 
-    def absorb(self, sighting: Sighting, now: float) -> Track:
-        # The nearest track, not the first in range: two people 1.5 m apart must not share one.
-        near = [(float(np.linalg.norm(t.xyz[:2] - sighting.xyz[:2])), t) for t in self.tracks
-                if t.label == sighting.label]
-        distance, track = min(near, key=lambda pair: pair[0], default=(math.inf, None))
-        if distance >= self.merge_radius:
-            track = Track(self.next_id, sighting, now)
-            self.tracks.append(track)
-            self.next_id += 1
-            return track
-        track.update(sighting, now)
-        # Two tracks started before either position settled can end up on one person.
-        for other in [t for _, t in near if t is not track
+    def confirm(self, track: Track, now: float) -> None:
+        """A new person near where a lost one could have walked to is taken to be them."""
+        track.status = "confirmed"
+        lost = [(float(np.linalg.norm(t.xyz[:2] - track.xyz[:2])), t) for t in self._tracks
+                if t.status == "lost" and t.label == track.label]
+        distance, match = min(lost, key=lambda pair: pair[0], default=(math.inf, None))
+        if match is not None and distance < min(self.merge_radius + WALK_SPEED * (now - match.last_seen),
+                                                MAX_WALK):
+            track.id, track.hits = match.id, track.hits + match.hits
+            self._tracks.remove(match)
+
+    def alive(self, track: Track, now: float) -> bool:
+        match track.status:
+            case "candidate":
+                return track.belief > REJECT
+            case "lost":
+                return now - track.last_seen < self.lost_timeout
+        return True
+
+    def associate(self, sightings: list[Sighting], now: float) -> set[Track]:
+        # Closest pairs first, so two people seen in one frame cannot end up on one track.
+        pairs = sorted(
+            (float(np.linalg.norm(t.xyz[:2] - s.xyz[:2])), i, j)
+            for i, s in enumerate(sightings) for j, t in enumerate(self._tracks)
+            if t.label == s.label)
+        taken: dict[int, Track] = {}
+        seen: set[Track] = set()
+        for distance, i, j in pairs:
+            track = self._tracks[j]
+            if distance < self.merge_radius and i not in taken and track not in seen:
+                taken[i] = track
+                seen.add(track)
+        for i, sighting in enumerate(sightings):
+            if i in taken:
+                taken[i].update(sighting, now)
+            else:
+                track = Track(self.next_id, sighting, now)
+                self._tracks.append(track)
+                self.next_id += 1
+                seen.add(track)
+        return seen
+
+    def merge_into(self, track: Track) -> None:
+        """Two tracks started before either position settled can end up on one person."""
+        if track not in self._tracks:
+            return
+        for other in [t for t in self._tracks if t is not track and t.label == track.label
                       and np.linalg.norm(t.xyz[:2] - track.xyz[:2]) < self.merge_radius]:
             track.merge(other)
-            self.tracks.remove(other)
-        return track
+            self._tracks.remove(other)
 
-    def targets(self, now: float) -> list[dict]:
-        if self.timeout > 0:
-            self.tracks = [t for t in self.tracks if now - t.last_seen < self.timeout]
-        return [t.payload(now) for t in self.tracks if t.confirmed]
-
-    def candidates(self, now: float) -> list[dict]:
-        return [t.payload(now) for t in self.tracks if not t.confirmed]
+    def tracks(self, now: float) -> list[dict]:
+        return [t.payload(now) for t in self._tracks]

@@ -451,3 +451,36 @@ boxes come before NMS. On this machine's CPU, onnxruntime with 2 threads takes
 `https://fuel.gazebosim.org/1.0/OpenRobotics/models/<name>.zip` works. The
 `/tip/files.zip` form returns 404. `MaleVisitorPhone` is a skinned DAE and
 does not render as a static include, so it is not used
+
+## A shelf deck at flight altitude is missing from the 2D map
+
+The rack decks are 7 cm plates, the third one at 2.45-2.52 m. At 2.5 m the camera
+is at 2.49 m, level with that deck, so it only ever sees the deck's front edge.
+Flying along an aisle, that edge is side-on and gives no depth points. So
+`pointcloud_to_laserscan` has nothing there, and the grid mapper marks the rack
+face free wherever a slot has no cargo. In a 2.5 m test flight, the ground-truth
+clearance check (`./run.sh clearance`) found the planner had put a waypoint
+0.25 m from a deck edge. The prop disc crossed a deck edge 4 times, by up to 5 cm.
+At 2.8 m the camera looks down onto the deck's top surface, which does give
+points. The scan band goes down to -0.5 m, so that surface is inside it. The
+same holds for any thin horizontal part level with the camera, such as a real
+rack's beams
+
+## Gazebo's set_pose service takes about half a second per call
+
+`gz service -s /world/warehouse/set_pose` from the CLI returns after ~0.5 s,
+most of it process start-up and discovery. A person walked in 0.2 s steps
+therefore moves at a third of the intended speed. `walk_person.py` moves by
+elapsed time instead of by step count
+
+## A rack upright is cleared from a 2D grid by beams passing beside it
+
+At 2.8 m the scan slice (2.3-3.25 m) passes through the open shelves between
+decks. A 0.1 m upright fills half of a 0.2 m cell. Each scan hits it once but
+also sends beams past it through the same cell, and those count as misses. So
+the cell kept dropping back to free, and the planner flew within 0.3 m of
+uprights: 5 contacts in one run. Making cells above a log-odds of 2.5 clear ten
+times slower fixed it. Making them never clear did not: people do show up in the
+slice now and then, and a person who walked away left a permanent obstacle that
+blocked the view of their old spot
+

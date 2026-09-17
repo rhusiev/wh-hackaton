@@ -3,7 +3,10 @@
 
 The stand-in for RTAB-Map when slam:=false: the pose is taken as known, so the
 grid is only as good as the scan. Each beam clears the cells it passes and marks
-the cell it ends in; a beam with no return clears up to the scan's range.
+the cell it ends in; a beam with no return clears up to the scan's range. A cell
+hit often enough clears ten times slower: a rack upright is thinner than a cell,
+and beams passing beside it through the open shelves would otherwise clear it
+again. Anything that does leave, like a person seen in the slice, still clears.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ from geometry import yaw
 
 HIT, MISS = 0.85, -0.4
 LOG_ODDS_MIN, LOG_ODDS_MAX = -2.0, 3.5
+SOLID = 2.5              # log-odds from which misses count a tenth
 
 
 class GridMapper(Node):
@@ -84,7 +88,8 @@ class GridMapper(Node):
         inside = (rows >= 0) & (rows < self.shape[0]) & (cols >= 0) & (cols < self.shape[1])
         cells = np.unique(rows[inside] * self.shape[1] + cols[inside])
         flat = self.log_odds.reshape(-1)
-        flat[cells] = np.clip(flat[cells] + delta, LOG_ODDS_MIN, LOG_ODDS_MAX)
+        step = np.where(flat[cells] >= SOLID, delta / 10, delta) if delta < 0 else delta
+        flat[cells] = np.clip(flat[cells] + step, LOG_ODDS_MIN, LOG_ODDS_MAX)
         self.seen.reshape(-1)[cells] = True
 
     def publish(self) -> None:

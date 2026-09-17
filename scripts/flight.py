@@ -9,6 +9,7 @@ it comes from SLAM, so nothing here depends on which.
 
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass
 
@@ -20,7 +21,7 @@ from nav_msgs.msg import OccupancyGrid
 from occupancy import Grid
 from rclpy.qos import QoSDurabilityPolicy, QoSProfile, qos_profile_sensor_data
 from tf2_ros import Buffer, TransformListener
-from vision_msgs.msg import Detection3DArray
+from std_msgs.msg import String
 
 SETPOINT_RATE = 10.0
 ARRIVE_RADIUS = 0.6
@@ -30,11 +31,13 @@ SETTLE = 1.0  # lets the map catch up with a turn
 
 
 @dataclass
-class Candidate:
-    id: str
+class Person:
+    id: int
+    status: str        # candidate, confirmed or lost, see tracker.py
     x: float
     y: float
     confidence: float
+    age: float         # s since last seen
 
 
 class Flight(Copter):
@@ -46,7 +49,7 @@ class Flight(Copter):
         self.local: PoseStamped | None = None
         self.target: PoseStamped | None = None
         self.map: OccupancyGrid | None = None
-        self._candidates: Detection3DArray | None = None
+        self._people: list[Person] = []
         self.offset = (0.0, 0.0)
 
         self.tf_buffer = Buffer()
@@ -58,8 +61,7 @@ class Flight(Copter):
         self.create_subscription(
             OccupancyGrid, "/map", lambda msg: setattr(self, "map", msg),
             QoSProfile(depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL))
-        self.create_subscription(Detection3DArray, "/people/candidates",
-                                 lambda msg: setattr(self, "_candidates", msg), 10)
+        self.create_subscription(String, "/people/tracks", self._on_tracks, 1)
         self.create_timer(1.0 / SETPOINT_RATE, self._resend)
 
     def _pose(self):
@@ -81,13 +83,13 @@ class Flight(Copter):
             return None
         return Grid.from_msg(self.map)
 
-    def candidates(self) -> list[Candidate]:
-        """People the tracker is not sure of yet, from its latest report."""
-        if self._candidates is None:
-            return []
-        return [Candidate(d.id, d.bbox.center.position.x, d.bbox.center.position.y,
-                          d.results[0].hypothesis.score)
-                for d in self._candidates.detections]
+    def _on_tracks(self, msg: String) -> None:
+        self._people = [Person(t["id"], t["status"], t["x"], t["y"], t["confidence"], t["age"])
+                        for t in json.loads(msg.data) if t["label"] == "person"]
+
+    def people(self) -> list[Person]:
+        """Every track from the tracker's latest report, refreshed once a second."""
+        return self._people
 
     def _resend(self) -> None:
         """GUIDED drops a setpoint after ~3 s of silence, so keep resending it."""

@@ -5,7 +5,8 @@
     ./run.sh score --radius 1
 
 Prints each real person as found or missed with the position error, then the
-reported targets that match nobody. Exits 1 if anyone was missed.
+confirmed targets that match nobody, then the lost ones, which are not scored.
+Exits 1 if anyone was missed.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from pathlib import Path
 import websockets
 
 TRUTH = Path(__file__).resolve().parent.parent / "worlds" / "warehouse_targets.json"
+MOVED = Path("/tmp/moved_people.json")  # written by walk_person.py
 
 
 async def snapshot(url: str) -> dict:
@@ -35,7 +37,13 @@ def main() -> None:
     args = parser.parse_args()
 
     people = json.loads(TRUTH.read_text())["targets"]
-    reported = asyncio.run(snapshot(args.url))["targets"]
+    moved = json.loads(MOVED.read_text()) if MOVED.exists() else {}
+    for person in people:
+        if person["name"] in moved:
+            person["xyz"][:2] = moved[person["name"]]
+    targets = asyncio.run(snapshot(args.url))["targets"]
+    reported = [t for t in targets if t["status"] == "confirmed"]
+    lost = [t for t in targets if t["status"] == "lost"]
 
     # Closest pairs first, so one report cannot claim two people.
     pairs = sorted(
@@ -61,7 +69,11 @@ def main() -> None:
             print(f"false   target {target['id']} at {target['x']:.1f}, {target['y']:.1f}, "
                   f"{target['hits']} hits")
 
-    print(f"{len(match)}/{len(people)} people found, {len(reported) - len(used)} false targets")
+    for target in lost:
+        print(f"lost    target {target['id']} last seen at {target['x']:.1f}, {target['y']:.1f} "
+              f"{target['age']:.0f} s ago")
+    print(f"{len(match)}/{len(people)} people found, {len(reported) - len(used)} false targets, "
+          f"{len(lost)} lost")
     sys.exit(0 if len(match) == len(people) else 1)
 
 

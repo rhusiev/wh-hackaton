@@ -37,7 +37,8 @@ Then open two terminals in the project folder:
 
 The Gazebo window shows the drone take off and sweep all five aisles.
 `./run.sh explore --strategy frontier` instead explores with no prior layout: it flies
-toward whatever part of the map is still unknown
+toward whatever part of the map is still unknown. `--strategy watch` does the same,
+then keeps flying between a few spots that together keep every person found in view
 
 To check that everything works, or to see what the drone and the glasses see:
 

@@ -58,7 +58,8 @@ def generate_launch_description() -> LaunchDescription:
             "use_sim_time": True,
             "target_frame": "base_link",
             "transform_tolerance": 0.05,
-            "min_height": -0.35,
+            # From 2.8 m this still takes in the top of the 2.45 m shelf deck.
+            "min_height": -0.5,
             "max_height": 0.45,
             "angle_min": -HFOV_HALF,
             "angle_max": HFOV_HALF,
@@ -135,7 +136,7 @@ def generate_launch_description() -> LaunchDescription:
             "Grid/CellSize": "0.1",
             "Grid/RangeMax": "8.0",
             "Grid/FromDepth": "false",
-            "Grid/MaxObstacleHeight": "2.5",
+            "Grid/MaxObstacleHeight": "3.5",
             "RGBD/NeighborLinkRefining": "true",
             "Mem/ImagePreDecimation": "2",
         }],

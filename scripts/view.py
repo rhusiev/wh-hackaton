@@ -16,12 +16,11 @@ class CameraView:
     intrinsics: tuple[float, float, float, float]  # fx, fy, cx, cy
     size: tuple[int, int]     # width, height in pixels
     grid: Grid | None
-    max_range: float
     margin: float = 0.1       # of the image, so a person cut by the edge is not expected
 
-    def visible(self, xyz: np.ndarray) -> bool:
+    def visible(self, xyz: np.ndarray, max_range: float) -> bool:
         x, y, z = self.rotation.T @ (xyz - self.position)
-        if not 0.7 < z <= self.max_range:
+        if not 0.7 < z <= max_range:
             return False
         fx, fy, cx, cy = self.intrinsics
         u, v = fx * x / z + cx, fy * y / z + cy
@@ -31,7 +30,4 @@ class CameraView:
             return False
         if self.grid is None:
             return False
-        # Stop short of the target, whose own cell may be marked occupied by its body.
-        direction = xyz[:2] - self.position[:2]
-        end = self.position[:2] + direction * max(0.0, 1 - 0.6 / np.linalg.norm(direction))
-        return self.grid.clear(tuple(self.position[:2]), tuple(end))
+        return self.grid.sees(tuple(self.position[:2]), tuple(xyz[:2]))
