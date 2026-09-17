@@ -140,8 +140,17 @@ This is the part the idea actually needs, and it is four pieces:
 3. **Targets → tracks.** `scripts/ar_bridge.py` transforms detections into the
    map frame and hands them to a tracker (`scripts/tracker.py`). Each sighting
    joins the nearest track of its label within 1 m, or starts a new one. Two
-   tracks that drift within 1 m of each other are merged. A track is only sent
-   after 6 sightings, and a "person" whose top is above 2.3 m is dropped. This is the point of the
+   tracks that drift within 1 m of each other are merged. A "person" whose top is
+   above 2.3 m is dropped. Each track carries a confidence, kept as log-odds
+   (a sum that maps to 0-1 through a sigmoid):
+   - A sighting adds 0.5.
+   - A frame that misses the track subtracts 0.35. It only counts when the track
+     is within 8 m (`miss_range`), inside the image and not hidden behind the map.
+     So a person behind a rack loses nothing.
+   - Past 2.0, with at least 6 sightings, the track is confirmed and sent as a
+     target. It is unconfirmed again below 0.0, and deleted at -2.0.
+   Unconfirmed tracks are published on `/people/candidates` for the explorer to
+   look at more closely. This is the point of the
    whole thing: a person seen once down an aisle stays on the minimap after the
    drone has flown past, which is what "бачити людину за стінкою" means.
 4. **Tracks → Spectacles.** The same node serves a WebSocket on port 8790 at
@@ -152,6 +161,7 @@ This is the part the idea actually needs, and it is four pieces:
     "drone": {"x": -13.4, "y": 0.1, "z": 2.5, "yaw": 0.02},
     "targets": [{"id": 0, "label": "person", "x": -9.0, "y": 0.0, "z": 0.8,
                  "h": 1.6, "score": 0.78, "age": 1.3, "hits": 12,
+                 "confidence": 0.95,
                  "head": {"x": -9.0, "y": 0.0, "z": 1.5, "size": 0.25}}],
     "map": {"res": 0.2, "w": 200, "h": 200, "x0": -20.0, "y0": -20.0,
             "cells": "<base64, 0 free / 1 occupied / 2 unknown>"}}
@@ -176,7 +186,15 @@ finds the nearest reachable group of frontier cells by breadth-first search, and
 flies there in legs of at most 3 m, facing the direction of travel. The scan only
 covers what the camera faces. At each frontier it turns toward the unknown
 space. A frontier it has visited or failed to reach is skipped within 1.5 m. It
-stops when no frontier is left or after `--max-time` (600 s). In test runs it
+stops when no frontier is left or after `--max-time` (600 s).
+
+Between legs it takes a closer look at candidates below 0.9 confidence, nearest
+first, at most twice each (`--no-inspect` turns this off). It picks a spot 3.5 m
+from the candidate (or 2.5 m or 4.9 m) that it can reach and that has a clear line
+to them on the map. It flies there, faces them and hovers 3 s. A real person keeps
+being detected and gets confirmed. A false one keeps being missed and is deleted.
+
+Before inspection, in test runs it
 flew 34-42 legs in about 4 min and found all 6 people, each within 0.25 m and
 with a head. False people went away in steps:
 
@@ -191,6 +209,9 @@ with a head. False people went away in steps:
 4. With track merging and the torso spread check, 0 remained. person_3 had
    only 6 sightings, exactly the minimum, so a shorter look would miss them. The
    next run did: it flew 26 legs, saw person_3 too briefly and found 5 of 6
+5. With inspection, it looked at 10 candidates and found 6 of 6 with 0 false
+   targets. person_3 now had 83 sightings instead of 6. 3 of the looks found no
+   clear viewpoint, because the candidate was still in unknown map
 
 To move this to the real aircraft, run with `detector:=none` and start
 `depthai_ros_driver` instead. It publishes the same `Detection3DArray`, so
@@ -206,7 +227,7 @@ each one can be replaced without touching the others.
 | Detector node | publishes `/oak/spatial_detections` (and `/oak/detections_2d`), person and head share an id | `person_detector.py`, `spatial_detector.py` | `detector:=none` and run your own node, e.g. `depthai_ros_driver` |
 | Detector network | `person_network.PersonNetwork`: called with an RGB image, returns `Person(box, score, head)` | `person_network:PoseNetwork` | parameter `network` (built with `model`, `threads`, `min_score`, `min_keypoint`), or only `model` for other YOLO-pose weights |
 | Mapper | publishes `/map` as `nav_msgs/OccupancyGrid` in `map` | `grid_mapper.py`, RTAB-Map with `slam:=true` | `mapper:=false` and run your own node |
-| Tracker | `tracker.Tracker`: `update(sightings, now)` and `targets(now)` | `tracker:NearestTracker` | parameter `tracker` (built with `merge_radius`, `min_hits`, `max_top`, `timeout`) |
+| Tracker | `tracker.Tracker`: `update(sightings, now, visible)`, `targets(now)` and `candidates(now)` | `tracker:NearestTracker` | parameter `tracker` (built with `merge_radius`, `min_hits`, `max_top`, `timeout`) |
 | AR server | serves the JSON above on port 8790 | `ar_bridge.py` | `ar:=false` and serve your own |
 | Exploration | a class built from the parsed arguments with `run(flight)`, optional static `add_arguments(parser)` | `sweep`, `frontier` | `./run.sh explore --strategy my_search.py:MySearch` |
 | Flight | `flight.Flight`: `here`, `heading`, `grid`, `fly_to`, `turn`, over MAVROS in GUIDED | `flight.py` | subclass it for another autopilot link; strategies do not change |

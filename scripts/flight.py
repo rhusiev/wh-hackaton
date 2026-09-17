@@ -10,22 +10,31 @@ it comes from SLAM, so nothing here depends on which.
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 
-import numpy as np
 import rclpy
 from copter import Copter
-from frontier import Grid
 from geometry import yaw
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import OccupancyGrid
+from occupancy import Grid
 from rclpy.qos import QoSDurabilityPolicy, QoSProfile, qos_profile_sensor_data
 from tf2_ros import Buffer, TransformListener
+from vision_msgs.msg import Detection3DArray
 
 SETPOINT_RATE = 10.0
 ARRIVE_RADIUS = 0.6
 LEG_TIMEOUT = 60.0
 YAW_TOLERANCE = 0.15
 SETTLE = 1.0  # lets the map catch up with a turn
+
+
+@dataclass
+class Candidate:
+    id: str
+    x: float
+    y: float
+    confidence: float
 
 
 class Flight(Copter):
@@ -37,6 +46,7 @@ class Flight(Copter):
         self.local: PoseStamped | None = None
         self.target: PoseStamped | None = None
         self.map: OccupancyGrid | None = None
+        self._candidates: Detection3DArray | None = None
         self.offset = (0.0, 0.0)
 
         self.tf_buffer = Buffer()
@@ -48,6 +58,8 @@ class Flight(Copter):
         self.create_subscription(
             OccupancyGrid, "/map", lambda msg: setattr(self, "map", msg),
             QoSProfile(depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL))
+        self.create_subscription(Detection3DArray, "/people/candidates",
+                                 lambda msg: setattr(self, "_candidates", msg), 10)
         self.create_timer(1.0 / SETPOINT_RATE, self._resend)
 
     def _pose(self):
@@ -67,9 +79,15 @@ class Flight(Copter):
     def grid(self) -> Grid | None:
         if self.map is None:
             return None
-        info = self.map.info
-        return Grid(np.asarray(self.map.data, dtype=np.int8).reshape(info.height, info.width),
-                    info.resolution, (info.origin.position.x, info.origin.position.y))
+        return Grid.from_msg(self.map)
+
+    def candidates(self) -> list[Candidate]:
+        """People the tracker is not sure of yet, from its latest report."""
+        if self._candidates is None:
+            return []
+        return [Candidate(d.id, d.bbox.center.position.x, d.bbox.center.position.y,
+                          d.results[0].hypothesis.score)
+                for d in self._candidates.detections]
 
     def _resend(self) -> None:
         """GUIDED drops a setpoint after ~3 s of silence, so keep resending it."""
