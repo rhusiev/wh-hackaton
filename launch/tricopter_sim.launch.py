@@ -27,7 +27,7 @@ from launch.substitutions import (
     PythonExpression,
 )
 from launch_ros.actions import ComposableNodeContainer, Node
-from launch_ros.descriptions import ComposableNode
+from launch_ros.descriptions import ComposableNode, ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -51,6 +51,8 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument("world", default_value="warehouse"),
         DeclareLaunchArgument("gui", default_value="true", choices=["true", "false"]),
         DeclareLaunchArgument("verbose", default_value="1"),
+        # 1 = full 640x400 into the cloud and scan, 2 = 320x200, 4 = 160x100.
+        DeclareLaunchArgument("depth_decimation", default_value="4"),
         DeclareLaunchArgument("name", default_value="tricopter"),
         DeclareLaunchArgument("x", default_value="-13.5"),
         DeclareLaunchArgument("y", default_value="0.0"),
@@ -123,8 +125,9 @@ def generate_launch_description() -> LaunchDescription:
 
     # Gazebo's own /rgbd/points is X-forward while being tagged with the optical
     # frame, so the usable cloud is rebuilt here from the depth image instead.
-    # Decimating 4x first keeps 160 columns, still finer than the scan's 139 bins,
-    # and cuts the cloud and the scan slicer's work 16x.
+    # The default 4x decimation keeps 160 columns, still finer than the scan's 139
+    # bins, and cuts the cloud and the scan slicer's work 16x.
+    decimation = ParameterValue(LaunchConfiguration("depth_decimation"), value_type=int)
     depth_to_cloud = ComposableNodeContainer(
         name="depth_proc",
         namespace="",
@@ -138,8 +141,8 @@ def generate_launch_description() -> LaunchDescription:
                 name="depth_decimate",
                 parameters=[{
                     "use_sim_time": True,
-                    "decimation_x": 4,
-                    "decimation_y": 4,
+                    "decimation_x": decimation,
+                    "decimation_y": decimation,
                     "interpolation": 0,  # nearest, depth must not be blended
                 }],
                 remappings=[

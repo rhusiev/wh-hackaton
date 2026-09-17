@@ -169,7 +169,8 @@ that trusts the label puts it 90° out. The setup here therefore:
   `camera_optical_frame`. `image_proc::CropDecimateNode` first takes the depth to
   160x100 with nearest-neighbour sampling. That is still finer than the scan's 139
   bins, and it took `/scan` from ~5 Hz to the full 15 Hz on a busy host. The cloud
-  is uncoloured and sparse in RViz as a result.
+  is uncoloured and sparse in RViz as a result. `depth_decimation:=1` restores full
+  resolution and still holds 15 Hz. It costs ~0.3 core more, in the scan slicer.
 
 Use `/camera/depth/points`.
 

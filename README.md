@@ -126,6 +126,7 @@ Useful launch arguments:
 ./run.sh sim gui:=false                         # headless Gazebo
 ./run.sh sim x:=-13.5 y:=5.0 z:=0.2 yaw:=0.0    # spawn pose
 ./run.sh sim sitl:=true                         # start SITL inside the launch too
+./run.sh sim depth_decimation:=1                # full 640x400 depth into the cloud and scan (default 4)
 ```
 
 ```bash
@@ -133,6 +134,8 @@ Useful launch arguments:
 ./run.sh sim perception:=false                  # bare flight sim, no detector or AR
 ./run.sh explore --altitude 2.5                 # fly the search pattern
 ./run.sh smoke                                  # check the topic contract
+./run.sh demo                                   # colour and false-coloured depth side by side
+./run.sh demo --save frame.png                  # same, one frame to a file on a headless host
 ```
 
 `WIPE=1 ./run.sh sitl` resets the simulated EEPROM, which you want after editing
