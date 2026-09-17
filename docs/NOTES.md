@@ -1,0 +1,417 @@
+# Findings
+
+Things about ArduPilot, `ardupilot_gazebo` and Gazebo that are not obvious from
+their docs, and that this setup depends on. Verified against ArduPilot
+`Copter-4.6.3` and `ardupilot_gazebo` `main` on 2026-09-16.
+
+## ArduPilot tricopter mixing
+
+From `libraries/AP_Motors/AP_MotorsTri.cpp`:
+
+- Motors are on outputs **1 (front right), 2 (front left), 4 (rear)**. Output 3
+  is skipped. The tail servo is `SRV_Channel::k_motor7`, i.e. `SERVO7_FUNCTION 39`.
+  In the plugin these are channel indices 0, 1, 3 and 6.
+- The mixer is `right = -0.5·roll + 0.5·pitch`, `left = 0.5·roll + 0.5·pitch`,
+  `rear = -0.5·pitch`. The equal 0.5 pitch weights are only correct for an
+  equilateral Y3: front rotors at 0.5·L forward, rear at 1.0·L back. The model
+  uses exactly that (front at ±60° from the nose, L = 0.27 m), so the mixer
+  matches the geometry.
+- Roll authority is 1.73× pitch authority for that geometry and the mixer does
+  not equalise it. That is true of every real tricopter; ArduPilot's stock gains
+  already assume it.
+- `_pivot_angle = asin(yaw_thrust)` and then `_thrust_rear /= cos(_pivot_angle)`.
+  Tilting the rear rotor is therefore modelled as vectoring, which is what the
+  SDF does by rotating the whole rotor link.
+
+## The tail servo full scale is MOT_YAW_SV_ANGLE, not 45°
+
+`init()` calls `SRV_Channels::set_angle(..., _yaw_servo_angle_max_deg * 100)`.
+So the **whole** `SERVO7_MIN..SERVO7_MAX` span maps to ±`MOT_YAW_SV_ANGLE`, not
+to some fixed ±45° scale. With `MOT_YAW_SV_ANGLE = 30`:
+
+```
+joint_angle = multiplier · (raw_cmd + offset),  raw_cmd ∈ [0, 1]
+offset      = -0.5
+multiplier  = -2 · radians(30) = -1.0472
+```
+
+**If you change `MOT_YAW_SV_ANGLE`, change `<multiplier>` on channel 6 to match**,
+or ArduPilot's yaw authority estimate and the real tilt will disagree.
+
+The parameter is `MOT_YAW_SV_ANGLE`. The source calls it `YAW_SV_ANGLE`, because
+that is the name *within* the `MOT_` parameter group.
+
+The sign is negative, derived as follows. Positive yaw demand means nose right.
+That drives PWM above trim, so `raw_cmd > 0.5`. With a negative multiplier the
+joint rotates **-θ** about body X, which points the rear thrust to +Y (left).
+Applied at x = -0.27 m that is a -Z torque, i.e. clockwise seen from above, i.e.
+nose right. Correct. A positive multiplier yaws the wrong way and the controller
+diverges within a second of arming.
+
+## The rear rotor needs a standing tail trim
+
+Front rotors counter-rotate and cancel. The rear rotor's reaction torque does
+not, so the tail servo carries a constant offset — roughly 6° at hover here. The
+yaw I-term absorbs it, which is why `ATC_RAT_YAW_I` is raised to 0.060 with
+`IMAX 0.50`. This is exactly the behaviour of a real tricopter, not a sim
+artefact. Do not "fix" it with `SERVO7_TRIM`; the required trim scales with
+throttle.
+
+## ardupilot_gazebo plugin gotchas
+
+- The element is `<rotorVelocitySlowdownSim>`, **not** `controlVelocitySlowdownSim`.
+  Misspelling it is silent — the plugin just uses the default.
+- Command math is `cmd = multiplier · (raw_cmd + offset)` where
+  `raw_cmd = (pwm - servo_min) / (servo_max - servo_min)`, clamped by nothing.
+  Keep `servo_min`/`servo_max` equal to `MOT_PWM_MIN`/`MOT_PWM_MAX`.
+- With `<useForce>1</useForce>` the VELOCITY and POSITION types both drive
+  `JointForceCmd` through a `gz::math::PID`, whose output is clamped to
+  `cmd_max`/`cmd_min`. Those are therefore **torques in N·m**, not velocities.
+  Setting `cmd_max` too low silently caps the motor.
+- `<imuName>` is looked up as a scoped sensor name inside the model. The
+  upstream `iris_with_standoffs` hangs its IMU off a zero-limit *revolute* joint
+  to dodge fixed-joint merging, which was a Gazebo Classic behaviour. gz-sim
+  keeps fixed-joint links separate, and on a light IMU link the zero limit is
+  soft: `imu_joint` wobbled at ~1.4 rad/s about Z, the gyro reported yaw the
+  airframe did not have, arming said `Gyros inconsistent`, and the controller
+  spun the drone up after takeoff. The joint here is `fixed`.
+- The IMU sensor needs `<pose degrees="true">0 0 0 180 0 0</pose>`, as upstream.
+  The plugin forwards the gyro and accel in the sensor frame, so without the roll
+  pitch and yaw rates reach ArduPilot sign-inverted and it flips within 0.4 s.
+- `gazeboXYZToNED` is `0 0 0 180 0 90`, not `180 0 0`: Gazebo's world is ENU,
+  so reaching NED takes the 90° yaw as well.
+- The plugins install to `lib/ardupilot_gazebo/`, not `lib/`, so that subdirectory
+  is what `GZ_SIM_SYSTEM_PLUGIN_PATH` must name. A wrong path fails silently: the
+  model spawns and SITL just waits for JSON that never comes.
+- Do not drive a light joint with a POSITION channel and `useForce`. With the tail
+  pivot at ~3.7e-4 kg·m², `p 25 d 1.5` chattered at ~12 rad/s, and `p 5 d 0.09`
+  crept toward a target with a 10 s time constant on the ground. In the air it ran
+  past a -0.52 rad target and sat on the -0.785 rad limit for seconds, so yaw spun
+  up right after takeoff. The tail now uses a COMMAND channel. The plugin only
+  publishes the angle, and gz-sim's `JointPositionController` with
+  `use_velocity_commands` tracks it. POSITION without `useForce` is not
+  implemented upstream: it only logs a warning.
+- A VELOCITY channel with `useForce` is also explicit at the physics step, so its
+  speed error shrinks by `P·dt/I` per step. It rings or diverges unless that is
+  below 2. With the rotor's 1.3e-4 kg·m² at a 2 ms step, `p_gain 0.2` gives 3.1.
+  `0.05` gives 0.77.
+- `<lock_step>1</lock_step>` makes Gazebo and SITL step together. On a slow GPU
+  the whole sim drops below real time instead of the flight controller
+  desyncing. Keep it on.
+
+## SITL frame selection
+
+There is a `tri` frame and a `gazebo-iris` frame, and you need bits of both.
+Only frames marked `"external": True` in `Tools/autotest/pysim/vehicleinfo.py`
+speak the JSON protocol Gazebo needs, and `tri` is not one of them. So SITL runs
+as `-f gazebo-iris --model JSON` and `config/tricopter.parm` is applied on top,
+which is what actually makes it a tricopter. Later default-param files win, so
+`FRAME_CLASS 7` overrides the iris `FRAME_CLASS 1`.
+
+`gazebo-iris.parm` also enables a fake sonar (`RNGFND1_TYPE 1`, `SIM_SONAR_SCALE`)
+and precision landing. Both are turned back off in `tricopter.parm` — they are
+iris test fixtures, not part of this airframe.
+
+## Rotor model derivation
+
+`LiftDrag` computes `L = 0.5·ρ·A·(cla·α)·v²` with `v = ω·r_cp`, so thrust is
+`k·ω²` with `k = 0.5·ρ·A·cla·a0·r_cp²`. Targets and the values that hit them:
+
+| Target | Value |
+| --- | --- |
+| max rotor speed | 1000 rad/s (≈ 9550 rpm; a 900 KV motor on 6S loaded) |
+| thrust at max | 31.4 N (3.2 kgf), so 94 N total against 29.5 N of weight |
+| shaft power at max | 839 W — from ideal induced power 504 W at a figure of merit of 0.6 |
+| `r_cp` | 0.089 m = 0.7 × the 0.127 m prop radius |
+| `a0`, `cla` | 0.15 rad, 5.0 |
+| `area` | 0.00878 m² — solves `k = 3.14e-5`; a real 10×5 tri-blade is ≈ 0.0095 m² |
+| `cd0`, `cda` | 0.02, 1.37 — gives `cd = 0.225` at α = 0.15, hence 0.839 N·m |
+
+Consequences worth knowing:
+
+- Thrust is *exactly* quadratic in the PWM command, so `MOT_THST_EXPO` is set to
+  **1.0**. The stock 0.65 assumes a real prop's partial linearisation and would
+  mistune the throttle response here.
+- `MOT_THST_HOVER 0.320` is 10.3 N of 31.4 N at the 3.136 kg AUW. Recompute it if you change the
+  mass or the rotor constants.
+- `alpha_stall` is 0.35, above the 0.15 operating α, so the rotor never leaves
+  the linear part of the curve. The model has no stall, no prop wash, no ground
+  effect and no translational lift.
+- Each rotor gets **two** `LiftDrag` plugins, with pressure centres at ±`r_cp` and
+  opposite `forward` vectors, each at half of the `area` above. With one plugin the
+  whole thrust acts 0.089 m off the hub, a ~0.9 N·m moment that rotates with the
+  rotor. At ~600-1000 rad/s it turns 1-2 rad per 2 ms physics step. That sampling
+  does not average the moment to zero: it leaves a steady torque on the tail tilt
+  joint. Upstream iris uses the same mirrored pair.
+
+## Gazebo publishes an X-forward point cloud under an optical frame_id
+
+This one costs an afternoon if you do not know it. Confirmed by reading
+`gz-sensors8/src/RgbdCameraSensor.cc` and the ogre2 depth shader:
+
+- `<optical_frame_id>` sets the `frame_id` on the image, the depth image, the
+  `camera_info` **and** the point cloud (`InitPointCloudPacked(..., OpticalFrameId(), ...)`).
+- The point data itself is copied straight out of the render buffer with
+  `memcpy`, no axis reordering. The shader
+  (`depth_camera_final_fs.glsl`) clamps `point.x` against near/far, so **depth
+  runs along X** — Gazebo's camera convention, not ROS's Z-forward optical one.
+
+So `/rgbd/points` is X-forward data wearing an optical-frame label, and anything
+that trusts the label puts it 90° out. The setup here therefore:
+
+- keeps `<optical_frame_id>camera_optical_frame</optical_frame_id>`, which *is*
+  correct for the images and `camera_info`, since those are what
+  `depth_image_proc` and RTAB-Map project through;
+- does not bridge Gazebo's `/rgbd/points` at all, since a subscriber makes
+  Gazebo build and serialize a cloud nobody should use;
+- rebuilds the real cloud with `depth_image_proc::PointCloudXyzNode` from the
+  depth image + `camera_info`, publishing `/camera/depth/points` genuinely in
+  `camera_optical_frame`. `image_proc::CropDecimateNode` first takes the depth to
+  160x100 with nearest-neighbour sampling. That is still finer than the scan's 139
+  bins, and it took `/scan` from ~5 Hz to the full 15 Hz on a busy host. The cloud
+  is uncoloured and sparse in RViz as a result.
+
+Use `/camera/depth/points`.
+
+Related: the sensor advertises only **one** `camera_info`, at
+`/rgbd/camera_info`. There is no `/rgbd/depth_image/camera_info`. The bridge maps
+that single topic to both `/camera/color/camera_info` and
+`/camera/depth/camera_info`.
+
+## Everything runs on sim time
+
+The bridge publishes `/clock` from Gazebo. Nodes that stamp their own messages
+— MAVROS, `depth_image_proc`, RViz — run with `use_sim_time: True`. The two
+bridges do not, and must not: they only forward Gazebo's stamps, and the
+`parameter_bridge` is the thing publishing `/clock` in the first place.
+
+This matters because MAVROS stamps with `now()` rather than FCU time. Leave one
+stamping node on wall time and, the moment the real-time factor drops below 1 on
+a weak GPU, its transforms extrapolate against everyone else's.
+
+The Python nodes are the exception. Gazebo publishes `/clock` once per
+physics step, and with `use_sim_time` rclpy handles every one of those messages
+in Python: `scan_relay.py` alone sat at 44% CPU relaying 2 Hz of scans. They
+stamp outputs with the incoming message's header and never with `now()`, so they
+run on wall time. The AR bridge's track `age` and `t` are therefore wall seconds.
+
+## MAVROS 2 parameters live on the plugin sub-nodes, not on mavros_node
+
+`mavros_node` starts each plugin as its own sub-node, so a plugin parameter is
+addressed as `<plugin>.<param>` under a wildcard node key. That is why
+`apm_config.yaml` looks like
+
+```yaml
+/**/local_position:
+  ros__parameters:
+    frame_id: "map"
+```
+
+and not like a flat dict on `mavros`. Passing `local_position.tf.send: True` in
+a `Node(parameters=[{...}])` silently does nothing - the parameter is declared
+on the parent node and no plugin ever reads it. The same trap applies to the
+connection parameters: they are `tgt_system` and `tgt_component`, not
+`target_system_id` / `target_component_id`.
+
+The launch file therefore includes mavros's own `node.launch`
+(`share/mavros/launch/node.launch`, an XML launch file - use
+`AnyLaunchDescriptionSource`) the way `apm.launch` does, with the same
+`apm_config.yaml`. The plugin list is `config/mavros_plugins.yaml` instead of
+`apm_pluginlists.yaml`. That stock list is a short denylist and loads ~40
+plugins, which cost ~0.9 core against SITL. The allowlist of the six plugins
+the scripts use takes it off the CPU chart.
+
+## TF comes from Gazebo, not from MAVROS
+
+`map` → `base_link` is published by the `OdometryPublisher` plugin in
+`models/tricopter/model.sdf` via `<tf_topic>/model/tricopter/pose</tf_topic>`,
+bridged as `gz.msgs.Pose_V` → `tf2_msgs/msg/TFMessage` on `/tf`.
+
+MAVROS could publish the same edge from `local_position`, but its pose is in the
+EKF origin frame, which is wherever the vehicle happened to be when the EKF
+initialised - not the Gazebo world origin. Two publishers of the same parent →
+child edge make TF non-deterministic, so only one of them may own it, and the
+ground-truth one is the useful one for evaluating whatever estimator you put in
+later. When you do add a visual odometry estimator, stop bridging `/tf` and let
+it own `map` → `odom` instead.
+
+## `docker compose exec` skips the entrypoint, and Ubuntu's .bashrc skips itself
+
+Two container gotchas that together make `./run.sh sim` silently fail with
+`ros2: command not found`:
+
+1. `docker compose exec` runs the command directly - it does not go through
+   `ENTRYPOINT`. Anything the entrypoint sets up (sourcing ROS, the uid remap)
+   is absent, and the command runs as the image's default user, which is `root`
+   unless `-u` says otherwise.
+2. Ubuntu's stock `/home/ubuntu/.bashrc` starts with
+   `case $- in *i*) ;; *) return;; esac`, so appending `source setup.bash` to it
+   does nothing for `bash -lc "..."`.
+
+So the environment goes in `/etc/profile.d/10-sim-env.sh`, which every login
+shell reads with no interactivity guard, and `run.sh` passes `-u ubuntu`.
+
+The entrypoint also runs `usermod -o -u <host uid> ubuntu` when the bind mount
+is owned by a different uid. Recursively chowning the mount instead would
+rewrite the ownership of the host's own files, which is the wrong direction to
+fix the mismatch in.
+
+## The OAK-D cannot see anything closer than 0.7 m
+
+Stereo disparity saturates: at 800p with a 7.5 cm baseline the nearest
+resolvable depth is about 0.7 m, and closer than that the camera returns
+nothing at all - not a wrong number, an empty pixel. `<depth_camera><clip>
+<near>0.7</near>` in `models/tricopter/model.sdf` reproduces that, deliberately.
+
+This sets the avoidance geometry. At `WPNAV_SPEED 300` (3 m/s) and
+`WPNAV_ACCEL 250` (2.5 m/s²) the braking distance is v²/2a = 1.8 m, so the last
+useful warning arrives 0.7 m before contact and the drone needs 2.5 m of notice
+in total. That is where `AVOID_MARGIN 2.5` comes from. Lower the margin and the
+aircraft will stop inside things.
+
+Extended disparity brings the minimum to ~0.35 m at the cost of the far range;
+it is a depthai pipeline setting, not something the sim models.
+
+## Detection range is limited by pixels, not by the depth sensor
+
+The stereo pair ranges to 12 m, so it is tempting to plan the search pattern
+around 12 m. A person detector cannot use that range.
+
+With `horizontal_fov` 1.2008 rad over 640 px the focal length is
+fx = 320 / tan(0.6004) = 466 px. A person is about 0.42 m across the shoulders,
+so they subtend 466 × 0.42 / z = 196 / z pixels. At 12 m that is 16 px wide,
+below what any of the usual MobileNet/YOLO input sizes will fire on. The
+practical floor is about 24 px, which puts the real detection horizon at
+
+    z = 466 × 0.42 / 24 = 8.2 m
+
+`scripts/spatial_detector.py` enforces this with its `min_pixel_width`
+parameter, so the simulated detector goes quiet at the same range the real one
+does. Aisle spacing in the search pattern should be sized off 8 m, not 12 m.
+
+## Gazebo's depth noise is the wrong shape for stereo
+
+`<noise><stddev>` on a depth camera is a constant in metres. Real stereo error
+grows with the square of range, because depth is inversely proportional to
+disparity: σ_z ≈ z²·σ_d/(b·f), which for a 7.5 cm baseline and 1/8 px disparity
+resolution gives roughly 2 % of range. The 0.02 m in the model is a compromise
+that is pessimistic up close and far too optimistic at 10 m.
+
+`scripts/spatial_detector.py` applies the range-dependent term itself
+(σ = 0.01 + 0.015·z) so that at least the object positions degrade realistically.
+Anything consuming the raw depth image does not get this.
+
+## Remaps do not reach mavros plugin sub-nodes
+
+`IncludeLaunchDescription` has no `remappings` argument, and the usual
+workaround - wrapping the include in a `GroupAction` with
+`SetRemap(src="/mavros/obstacle/send", dst="/scan")` - launches fine and does
+nothing. Verified at runtime: `/scan` had 0 subscribers and the plugin still
+listened on `/mavros/obstacle/send`. The remap is attached to `mavros_node`, but
+each plugin is its own sub-node and does not apply it.
+
+Publishing the scan directly onto `/mavros/obstacle/send` is not enough either:
+`pointcloud_to_laserscan` publishes BEST_EFFORT, the plugin subscribes RELIABLE,
+and ROS 2 never matches a RELIABLE subscriber to a BEST_EFFORT publisher.
+Neither node exposes a `qos_overrides` parameter for that topic. ArduPilot shows
+it as `Arm: PRX1: No Data`. `scripts/scan_relay.py` bridges the two QoS
+profiles. Without it `PRX1_TYPE 2` in `config/tricopter.parm` is inert and, worse,
+blocks arming.
+
+Related: `pointcloud_to_laserscan` and `depth_image_proc` both subscribe lazily,
+only while their output has a subscriber. With nobody on the scan, no cloud is
+computed at all, which is why `/camera/depth/points` read 0 Hz in the smoke test
+until something actually subscribed.
+
+## libgz-sim8-dev is not in the ROS apt repo
+
+`ros-jazzy-ros-gz` installs from `packages.ros.org`, which makes it look like
+Gazebo Harmonic is fully covered there. The development packages are not:
+`libgz-sim8-dev` and `gz-tools2` - both needed to compile `ardupilot_gazebo` -
+live only on `packages.osrfoundation.org/gazebo/ubuntu-stable`. Building without
+that repo fails with a bare `E: Unable to locate package libgz-sim8-dev`.
+
+## ArduPilot has no Copter-4.6 branch, only Copter-4.6.x tags
+
+`git clone --branch Copter-4.6` fails with `Remote branch Copter-4.6 not found`.
+The stable line exists as tags - `Copter-4.6.0` through `Copter-4.6.3` - while
+the newest branch head is `Copter-4.5`. `ARDUPILOT_REF` in the Dockerfile is
+pinned to a tag for that reason.
+
+Editing that `ARG` line invalidates every layer below it, including the ~5 min
+apt install, because an `ARG` instruction is itself a cache step. Override it at
+build time instead when experimenting:
+
+```bash
+ARDUPILOT_REF=Copter-4.6.2 docker compose build
+```
+
+## ardupilot_gazebo requires GStreamer even when nothing streams video
+
+`CMakeLists.txt:88` is `pkg_check_modules(GST REQUIRED gstreamer-1.0
+gstreamer-app-1.0)` - unconditional, with no option to turn it off. Only
+`GstCameraPlugin` links against it, and this project never loads that plugin,
+but cmake configure still aborts with:
+
+```
+Package 'gstreamer-1.0', required by 'virtual:world', not found
+```
+
+So `libgstreamer1.0-dev` and `libgstreamer-plugins-base1.0-dev` have to be in
+the image. They sit in their own layer *after* the ArduPilot waf build so that
+adding them does not invalidate the slowest layer.
+
+## SITL simulates a 3S battery unless told otherwise
+
+`SIM_BATT_VOLTAGE` defaults to 12.6 V. With the 6S `BATT_LOW_VOLT` settings the
+first arm attempt fails with `Battery 1 low voltage failsafe`. The parm file sets
+`SIM_BATT_VOLTAGE 25.2` and `SIM_BATT_CAP_AH 5.2`.
+
+## Pruning the BuildKit cache makes every later Dockerfile edit a full rebuild
+
+`docker builder prune -af` frees the space, but the next change - even one `ENV`
+line at the end - rebuilds ArduPilot and ardupilot_gazebo from scratch. On a
+nearly full disk that rebuild is what runs out of space, and a killed build
+leaves its cache records "in use" and unprunable until the daemon restarts. For
+a metadata-only fix, layer it on the existing image instead:
+`FROM wh-hackaton-sim:latest` plus the `ENV`, tagged back to the same name.
+
+## Gazebo's default collision checker is most of the warehouse's cost
+
+The real-time factor of the full stack at a 1 ms step was ~0.4. Measured one
+change at a time on this 8-core host:
+
+1. The empty warehouse alone ran at RTF 0.54. DART's default FCL collision
+   detector tests the static racks, walls and boxes against each other every
+   step. `<dart><collision_detector>bullet</collision_detector></dart>` in the
+   world's `<physics>` gives 1.01.
+2. The `gz-sim-contact-system` plugin cost 0.54 → 0.68 on its own. Nothing read
+   contacts, so it is gone.
+3. Every rclpy node with `use_sim_time` burns ~0.5 core on `/clock`. The rest of
+   that story is in "Everything runs on sim time".
+4. The step went from 1 ms to 2 ms: RTF 0.93 with everything running. Lock-step
+   makes each step one flight-controller tick, so SITL sees a 500 Hz gyro.
+   ArduPilot refuses to arm if the gyro rate is below 1.8x `SCHED_LOOP_RATE`
+   (`Gyro 0 rate 500Hz < loop ratex1.8 720Hz`). `config/sitl.parm` therefore sets
+   the loop to 250 Hz.
+
+Rendering was not the cost. Gazebo does use the GPU: `nvidia-smi` shows gz sim
+holding GPU memory. The `libEGL warning: pci id ... driver (null)` line at
+startup is Mesa probing devices and is harmless.
+
+Nothing else left in the stack can move to the GPU. Gazebo's physics is CPU-only,
+and ROS message transport has no GPU path. What remains is gz sim at ~1.7 cores
+and ~0.2 core for each of the other processes.
+
+## FastDDS sends a 1 MB image over UDP unless its shared-memory segment is bigger
+
+FastDDS's built-in shared-memory transport uses 512 KB segments. A 640x400
+`32FC1` depth frame is 1 MB and a colour frame 768 KB, so both fell back to
+fragmented UDP over loopback. The C++ depth pipeline kept up. rclpy
+subscribers got 5-11 Hz of the 15 Hz: the smoke test, and `spatial_detector.py`
+with it. `config/fastdds.xml` sets 16 MB segments, and `docker-compose.yaml`
+points `FASTRTPS_DEFAULT_PROFILES_FILE` at it. Every topic now arrives at 15 Hz.
+This works because the container uses `ipc: host` and has a 16 GB `/dev/shm`.
+A process outside the container falls back to UDP, which is still correct, only
+slower.
+

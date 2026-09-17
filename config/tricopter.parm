@@ -1,0 +1,99 @@
+# ArduCopter SITL defaults for the Gazebo tricopter.
+# Loaded on top of the gazebo-iris frame defaults, so every value here wins.
+
+# --- Frame -------------------------------------------------------------------
+FRAME_CLASS      7        # Tri
+FRAME_TYPE       1
+
+# --- Outputs: tri mixing uses 1, 2, 4 for motors and 7 for the tail servo -----
+SERVO1_FUNCTION  33       # Motor1, front right
+SERVO2_FUNCTION  34       # Motor2, front left
+SERVO4_FUNCTION  36       # Motor4, rear
+SERVO7_FUNCTION  39       # Motor7, tail tilt servo
+SERVO7_MIN       1000
+SERVO7_MAX       2000
+SERVO7_TRIM      1500
+SERVO7_REVERSED  0
+MOT_YAW_SV_ANGLE 30       # deg of tail tilt at full yaw demand
+
+# --- Motors ------------------------------------------------------------------
+MOT_PWM_TYPE     0
+MOT_PWM_MIN      1000
+MOT_PWM_MAX      2000
+MOT_SPIN_ARM     0.10
+MOT_SPIN_MIN     0.15
+MOT_SPIN_MAX     0.95
+MOT_THST_EXPO    1.0      # rotor thrust is exactly quadratic in the PWM command
+MOT_THST_HOVER   0.320    # 10.3 N of 31.4 N per rotor at 3.14 kg AUW (OAK-D + Pi 5)
+MOT_BAT_VOLT_MAX 25.2     # 6S
+MOT_BAT_VOLT_MIN 19.8
+
+# --- Attitude ----------------------------------------------------------------
+ATC_RAT_RLL_P    0.135
+ATC_RAT_RLL_I    0.135
+ATC_RAT_RLL_D    0.0040
+ATC_RAT_PIT_P    0.135
+ATC_RAT_PIT_I    0.135
+ATC_RAT_PIT_D    0.0040
+ATC_RAT_YAW_P    0.20
+ATC_RAT_YAW_I    0.060    # absorbs the rear rotor torque the tail servo has to trim out
+ATC_RAT_YAW_IMAX 0.50
+ATC_RAT_YAW_D    0.0
+ATC_ANG_YAW_P    4.5
+ATC_RAT_YAW_FLTE 5.0
+ATC_ACCEL_Y_MAX  18000
+ATC_SLEW_YAW     4500     # 45 deg/s: faster smears the stereo pair and depth drops out
+INS_GYRO_FILTER  30
+
+# --- Navigation: warehouse speeds, not field speeds ---------------------------
+WPNAV_SPEED      300      # cm/s
+WPNAV_SPEED_UP   150
+WPNAV_SPEED_DN   100
+WPNAV_ACCEL      250      # 1.8 m braking from 3 m/s, inside the 12 m sensor range
+WPNAV_RADIUS     30
+PILOT_SPEED_UP   200
+PILOT_SPEED_DN   150
+RTL_ALT          300
+LAND_SPEED       50
+
+# --- Obstacle avoidance fed by the OAK-D ------------------------------------
+# The companion computer turns depth into MAVLink OBSTACLE_DISTANCE, which
+# ArduPilot treats as a proximity sensor. Nothing here works until something is
+# actually publishing it - see scripts/scan_relay.py and launch/perception.launch.py.
+PRX1_TYPE        2        # MAVLink
+PRX1_ORIENT      0
+AVOID_ENABLE     7        # fence + proximity + beacon
+AVOID_MARGIN     2.5      # 1.8 m braking from 3 m/s + the 0.7 m stereo blind zone
+AVOID_BEHAVE     0        # slide along obstacles rather than stopping dead
+OA_TYPE          1        # BendyRuler path planning in Auto/Guided
+OA_LOOKAHEAD     5.0
+OA_MARGIN_MAX    2.0
+OA_DB_SIZE       200
+OA_DB_EXPIRE     10
+OA_DB_QUEUE_SIZE 80
+
+# --- Battery: Dogcom 6S 5200 mAh ---------------------------------------------
+BATT_CAPACITY    5200
+BATT_LOW_VOLT    21.0     # 3.50 V/cell
+BATT_CRT_VOLT    19.8     # 3.30 V/cell
+BATT_LOW_MAH     1560     # 30 %, a scout has to fly home across the search area
+BATT_CRT_MAH     780
+BATT_FS_LOW_ACT  2        # RTL
+BATT_FS_CRT_ACT  1        # Land
+
+# --- Telemetry to the companion computer -------------------------------------
+SR1_EXTRA1       20
+SR1_EXTRA2       10
+SR1_EXTRA3       5
+SR1_POSITION     20
+SR1_RAW_SENS     10
+SR1_RC_CHAN      5
+SR2_EXTRA1       20
+SR2_POSITION     20
+
+# --- Misc --------------------------------------------------------------------
+RNGFND1_TYPE     0        # the gazebo-iris defaults fake a sonar; this airframe has none
+PLND_ENABLED     0
+FENCE_ENABLE     0
+COMPASS_LEARN    0
+LOG_DISARMED     0

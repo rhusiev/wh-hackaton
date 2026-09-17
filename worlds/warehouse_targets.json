@@ -1,0 +1,95 @@
+{
+  "world": "warehouse",
+  "targets": [
+    {
+      "name": "person_0",
+      "label": "person",
+      "kind": "aisle",
+      "xyz": [
+        -9.0,
+        0.0,
+        1.15
+      ],
+      "size": [
+        0.42,
+        0.28,
+        0.7
+      ]
+    },
+    {
+      "name": "person_1",
+      "label": "person",
+      "kind": "aisle",
+      "xyz": [
+        4.5,
+        5.0,
+        1.15
+      ],
+      "size": [
+        0.42,
+        0.28,
+        0.7
+      ]
+    },
+    {
+      "name": "person_2",
+      "label": "person",
+      "kind": "occluded",
+      "xyz": [
+        -2.6,
+        -6.6,
+        1.15
+      ],
+      "size": [
+        0.42,
+        0.28,
+        0.7
+      ]
+    },
+    {
+      "name": "person_3",
+      "label": "person",
+      "kind": "occluded",
+      "xyz": [
+        7.8,
+        3.6,
+        1.15
+      ],
+      "size": [
+        0.42,
+        0.28,
+        0.7
+      ]
+    },
+    {
+      "name": "person_4",
+      "label": "person",
+      "kind": "occluded",
+      "xyz": [
+        -7.8,
+        -1.4,
+        1.15
+      ],
+      "size": [
+        0.42,
+        0.28,
+        0.7
+      ]
+    },
+    {
+      "name": "person_5",
+      "label": "person",
+      "kind": "corner",
+      "xyz": [
+        12.5,
+        -7.0,
+        1.15
+      ],
+      "size": [
+        0.42,
+        0.28,
+        0.7
+      ]
+    }
+  ]
+}

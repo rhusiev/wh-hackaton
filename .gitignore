@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+# SITL runtime output, see scripts/run_sitl.sh
+.sitl/
+*.tlog
+*.tlog.raw
+*.BIN
+*.log
+*.db
+.venv/
+.vscode/
+.idea/

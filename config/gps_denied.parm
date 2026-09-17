@@ -1,0 +1,23 @@
+# Indoor / GPS-denied search & rescue: the EKF takes position from the OAK-D
+# visual odometry instead of GNSS. Load on top of tricopter.parm:
+#
+#   ./run.sh sitl -- --add-param-file=config/gps_denied.parm
+#
+# Nothing will arm until /mavros/vision_pose/pose is actually being published at
+# >=10 Hz - launch rtabmap first (./run.sh sim slam:=true).
+
+GPS1_TYPE        0        # no GNSS at all, so the EKF cannot silently fall back
+SIM_GPS1_ENABLE  0
+
+EK3_SRC1_POSXY   6        # ExternalNav
+EK3_SRC1_VELXY   6
+EK3_SRC1_POSZ    1        # baro: stereo height drifts over a flat warehouse floor
+EK3_SRC1_VELZ    6
+EK3_SRC1_YAW     6        # ExternalNav yaw; the M10Q compass is useless near racks
+
+VISO_TYPE        0        # position comes in over MAVLink VISION_POSITION_ESTIMATE
+EK3_ENABLE       1
+AHRS_EKF_TYPE    3
+
+ARMING_CHECK     -9       # all checks except GPS
+FS_EKF_THRESH    1.0

@@ -1,0 +1,10 @@
+# Only what scripts/ uses. The stock ArduPilot list loads ~40 plugins and costs a core.
+/**:
+  ros__parameters:
+    plugin_allowlist:
+      - sys_status
+      - sys_time
+      - command
+      - local_position
+      - setpoint_position
+      - obstacle_distance

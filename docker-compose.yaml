@@ -1,0 +1,41 @@
+services:
+  sim:
+    build:
+      context: .
+      args:
+        ARDUPILOT_REF: ${ARDUPILOT_REF:-Copter-4.6.3}
+        WITH_RTABMAP: ${WITH_RTABMAP:-1}
+    image: wh-hackaton-sim:latest
+    container_name: wh-sim
+    tty: true
+    stdin_open: true
+
+    network_mode: "host"
+    ipc: "host"
+
+    security_opt:
+      - "seccomp:unconfined"
+      - "apparmor:unconfined"
+
+    environment:
+      - DISPLAY
+      - XAUTHORITY=/home/ubuntu/.Xauthority
+      - QT_X11_NO_MITSHM=1
+      - NVIDIA_DRIVER_CAPABILITIES=graphics,utility,compute,display
+      - NVIDIA_VISIBLE_DEVICES=all
+      - __GLX_VENDOR_LIBRARY_NAME=nvidia
+      - __NV_PRIME_RENDER_OFFLOAD=1
+      - FASTRTPS_DEFAULT_PROFILES_FILE=/workspace/wh-hackaton/config/fastdds.xml
+
+    volumes:
+      - .:/workspace/wh-hackaton
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ${XAUTHORITY:-$HOME/.Xauthority}:/home/ubuntu/.Xauthority:ro
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, utility, compute, graphics, display]

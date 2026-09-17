@@ -1,0 +1,11 @@
+# Simulation-only overrides, applied after tricopter.parm by scripts/run_sitl.sh.
+# Nothing here belongs on the real flight controller.
+
+# Gazebo steps at 2 ms, so the simulated gyro runs at 500 Hz. ArduPilot refuses to
+# arm unless the gyro rate is at least 1.8x the loop rate.
+SCHED_LOOP_RATE  250
+
+SIM_BATT_VOLTAGE 25.2     # SITL defaults to a 3S pack, which trips the 6S low-voltage failsafe
+SIM_BATT_CAP_AH  5.2
+
+LOG_MAX_FILES    10       # an unattended hover logs ~50 MB/h, and SITL never rotates on its own
