@@ -1,7 +1,10 @@
-# wh-hackaton - warehouse scout drone simulation
+# wh-hackaton - wallhack hackathon
 
-A simulated tricopter with an OAK-D depth camera flies through a warehouse,
-finds people and streams a minimap for Spectacles AR. The autopilot is real
+A wallhack for AR glasses: a scout drone looks behind the walls and racks you
+can't see past, and Spectacles draw the people it found on a minimap.
+
+This repo is its simulation. A tricopter with an OAK-D depth camera flies
+through a warehouse, detects people and streams them to the glasses. The autopilot is real
 ArduPilot firmware (SITL), the world is Gazebo Harmonic, the glue is ROS 2 Jazzy.
 Everything runs inside one Docker container
 
@@ -10,14 +13,14 @@ Everything runs inside one Docker container
 - Linux with an NVIDIA GPU and its driver
 - Docker with the Compose plugin
 - [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html), so the container can use the GPU
-- ~15 GB of disk for the image
+- ~7 GB of disk for the image
 
 ## Launch it
 
 ```bash
 git clone https://github.com/rhusiev/wh-hackaton.git
 cd wh-hackaton
-./run.sh build    # once, 20-40 min: builds ArduPilot and all ROS packages
+./run.sh pull     # once, downloads the ready image (~7 GB)
 ./run.sh up       # start the container in the background
 ```
 
@@ -39,6 +42,8 @@ To check that everything works, or to see what the camera sees:
 ./run.sh smoke    # prints PASS/FAIL for every topic and link
 ./run.sh demo     # window with colour and depth side by side
 ```
+
+To build the image yourself instead of pulling, run `./run.sh build` (20-40 min)
 
 Stop with Ctrl+C in terminal 1, and `./run.sh down` to remove the container
 

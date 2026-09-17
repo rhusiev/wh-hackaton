@@ -5,7 +5,7 @@ services:
       args:
         ARDUPILOT_REF: ${ARDUPILOT_REF:-Copter-4.6.3}
         WITH_RTABMAP: ${WITH_RTABMAP:-1}
-    image: wh-hackaton-sim:latest
+    image: ghcr.io/rhusiev/wh-hackaton-sim:latest
     container_name: wh-sim
     tty: true
     stdin_open: true

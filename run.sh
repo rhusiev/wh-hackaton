@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Thin wrapper around the sim container.
 #
-#   ./run.sh build          build the image (slow the first time: ArduPilot waf)
+#   ./run.sh pull           download the prebuilt image
+#   ./run.sh build          build the image locally instead (slow: ArduPilot waf)
+#   ./run.sh push           publish a locally built image
 #   ./run.sh up             start the container in the background
 #   ./run.sh sim [args]     Gazebo + bridges + MAVROS
 #   ./run.sh sitl [args]    ArduPilot SITL with the MAVProxy console
@@ -22,7 +24,9 @@ cmd=${1:-shell}
 shift || true
 
 case "${cmd}" in
+    pull)  docker compose pull "$@" ;;
     build) docker compose build "$@" ;;
+    push)  docker compose push "$@" ;;
     up)    xhost +local:docker >/dev/null 2>&1 || true
            docker compose up -d "$@" ;;
     down)  docker compose down "$@" ;;
