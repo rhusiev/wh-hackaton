@@ -73,7 +73,7 @@ companion computer and re-test the flight envelope on the real machine.
 | PDB-HEX + Dogcom 6S 5200 mAh | `MOT_BAT_VOLT_MIN/MAX` 19.8/25.2 V only. No discharge curve, no current draw |
 | DJI O4 Air Unit Pro | **not modelled.** It is a pilot video downlink and carries nothing autonomy needs |
 | RadioMaster RP3 V2 ELRS | **not modelled.** SITL RC comes from MAVProxy's `rc` command |
-| Luxonis OAK-D | Gazebo `rgbd_camera`, 640×400 @ 15 Hz, 68.8° HFOV, depth 0.7–12 m |
+| Luxonis OAK-D | Gazebo `rgbd_camera`, 640×400 @ 15 Hz, 68.8° HFOV, depth 0.7–30 m (12 m reliable) |
 | OAK-D on-device YOLO | `scripts/spatial_detector.py` — same `vision_msgs/Detection3DArray` contract |
 | Raspberry Pi 5 8 GB | **not modelled as a bottleneck.** Everything runs on the desktop; the rates are picked to fit the Pi |
 | Spectacles 2024 | `scripts/ar_bridge.py` — a WebSocket of JSON the Lens draws |
@@ -175,7 +175,7 @@ This is the part the idea actually needs, and it is four pieces:
 2. **Depth → targets.** `scripts/spatial_detector.py` stands in for the OAK-D's
    on-device network. It knows where the people are from
    `worlds/warehouse_targets.json`, and then decides what the camera could
-   actually see: inside the frustum, 0.7–12 m, at least 24 px across, and not
+   actually see: inside the frustum, 0.7–30 m, at least 24 px across, and not
    hidden behind a rack. The occlusion test compares the predicted range with
    the measured depth at that pixel, so it fails where the real one fails.
 3. **Targets → tracks.** `scripts/ar_bridge.py` transforms detections into the

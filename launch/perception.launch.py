@@ -19,7 +19,8 @@ SCRIPTS = ROOT / "scripts"
 # Must match the rgbd sensor in models/tricopter/model.sdf.
 HFOV_HALF = 0.6004
 DEPTH_MIN = 0.7
-DEPTH_MAX = 12.0
+# Depth goes to 30 m, but avoidance only trusts the reliable 12 m.
+SCAN_RANGE_MAX = 12.0
 
 
 # No use_sim_time: Gazebo publishes /clock every physics step, and in rclpy that
@@ -56,7 +57,7 @@ def generate_launch_description() -> LaunchDescription:
             "angle_increment": 0.0087,
             "scan_time": 1.0 / 15.0,
             "range_min": DEPTH_MIN,
-            "range_max": DEPTH_MAX,
+            "range_max": SCAN_RANGE_MAX,
             "use_inf": True,
         }],
     )

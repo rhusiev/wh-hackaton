@@ -119,9 +119,12 @@ def generate_launch_description() -> LaunchDescription:
         arguments=["/rgbd/image", "/rgbd/depth_image"],
         remappings=[
             ("/rgbd/image", "/camera/color/image_raw"),
-            ("/rgbd/depth_image", "/camera/depth/image_raw"),
+            ("/rgbd/depth_image", "/camera/depth/ideal/image_raw"),
         ],
     )
+
+    depth_noise = ExecuteProcess(
+        cmd=["python3", str(ROOT / "scripts" / "depth_noise.py")], output="screen")
 
     # Gazebo's own /rgbd/points is X-forward while being tagged with the optical
     # frame, so the usable cloud is rebuilt here from the depth image instead.
@@ -247,6 +250,7 @@ def generate_launch_description() -> LaunchDescription:
     ld.add_action(gz_sim)
     ld.add_action(bridge)
     ld.add_action(image_bridge)
+    ld.add_action(depth_noise)
     ld.add_action(depth_to_cloud)
     for node in static_tf:
         ld.add_action(node)

@@ -45,7 +45,7 @@ from vision_msgs.msg import Detection3DArray
 
 # Must match models/tricopter/model.sdf.
 EXPECTED_FX = 466.1
-DEPTH_NEAR, DEPTH_FAR = 0.7, 12.0
+DEPTH_NEAR, DEPTH_FAR = 0.7, 30.0
 
 GREEN, RED, DIM, RESET = "\033[32m", "\033[31m", "\033[2m", "\033[0m"
 
@@ -179,7 +179,7 @@ def main() -> int:
         values = np.frombuffer(depth.data, dtype=np.float32)
         finite = values[np.isfinite(values) & (values > 0)]
         report.check("depth encoding is 32FC1", depth.encoding == "32FC1", depth.encoding)
-        report.check("depth respects the 0.7-12 m stereo clip",
+        report.check("depth respects the 0.7-30 m stereo clip",
                      finite.size > 0 and finite.min() >= DEPTH_NEAR - 0.01
                      and finite.max() <= DEPTH_FAR + 0.01,
                      f"{finite.min():.2f}-{finite.max():.2f} m" if finite.size else "empty")

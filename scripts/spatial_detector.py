@@ -35,6 +35,8 @@ from vision_msgs.msg import (
 )
 from visualization_msgs.msg import Marker, MarkerArray
 
+from stereo import DEPTH_MAX, DEPTH_MIN, DEPTH_RELIABLE, sigma
+
 
 def quat_to_matrix(q) -> np.ndarray:
     x, y, z, w = q.x, q.y, q.z, q.w
@@ -51,8 +53,8 @@ class SpatialDetector(Node):
         self.declare_parameters("", [
             ("map_frame", "map"),
             ("camera_frame", "camera_optical_frame"),
-            ("min_range", 0.7),
-            ("max_range", 12.0),
+            ("min_range", DEPTH_MIN),
+            ("max_range", DEPTH_MAX),
             ("min_pixel_width", 24.0),
             ("occlusion_tolerance", 0.6),
             ("rate", 10.0),
@@ -137,25 +139,26 @@ class SpatialDetector(Node):
             return None
 
         # Anything measurably nearer than the target along the same ray is in
-        # front of it. The median rejects the depth image's speckle.
+        # front of it. The median rejects speckle, the 3σ margin the far-range error.
         ui, vi = int(u), int(v)
         patch = depth[max(vi - 2, 0):vi + 3, max(ui - 2, 0):ui + 3]
         finite = patch[np.isfinite(patch) & (patch > 0)]
-        if finite.size and float(np.median(finite)) < z - self.occlusion_tolerance:
+        if finite.size and float(np.median(finite)) < z - max(self.occlusion_tolerance, 3 * sigma(z)):
             return None
 
-        # Stereo error grows with range, and so does the detector's miss rate.
-        sigma = 0.01 + 0.015 * z
-        if self.rng.random() > max(0.4, 1.0 - (z - 4.0) / 12.0):
+        # Misses and position error grow with range, and past the reliable
+        # range both get markedly worse.
+        if self.rng.random() > self.confidence(z):
             return None
-        noisy = [float(c + self.rng.gauss(0.0, sigma)) for c in p]
+        error = float(sigma(z))
+        noisy = [float(c + self.rng.gauss(0.0, error)) for c in p]
 
         det = Detection3D()
         det.header = msg.header
         det.id = target["name"]
         hypothesis = ObjectHypothesisWithPose()
         hypothesis.hypothesis.class_id = target["label"]
-        hypothesis.hypothesis.score = round(max(0.4, 1.0 - z / 20.0), 3)
+        hypothesis.hypothesis.score = round(self.confidence(z), 3)
         hypothesis.pose.pose.position = Point(x=noisy[0], y=noisy[1], z=noisy[2])
         det.results.append(hypothesis)
         det.bbox = BoundingBox3D()
@@ -164,6 +167,12 @@ class SpatialDetector(Node):
         sx, sy, sz = target["size"]
         det.bbox.size = Vector3(x=sx, y=sy, z=sz)
         return det, z
+
+    @staticmethod
+    def confidence(z: float) -> float:
+        if z <= DEPTH_RELIABLE:
+            return max(0.4, 1.0 - (z - 4.0) / 12.0)
+        return 0.4 - 0.3 * (z - DEPTH_RELIABLE) / (DEPTH_MAX - DEPTH_RELIABLE)
 
     def publish_markers(self, msg, visible) -> None:
         array = MarkerArray()

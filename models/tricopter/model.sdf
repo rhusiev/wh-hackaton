@@ -154,12 +154,13 @@
             <height>400</height>
             <format>R8G8B8</format>
           </image>
-          <clip><near>0.1</near><far>20.0</far></clip>
+          <clip><near>0.1</near><far>40.0</far></clip>
           <!-- 0.7 m is the OAK-D stereo minimum at 800p: closer than that it
                returns nothing, so the drone is blind inside its own braking
                distance. Do not lower it to make obstacle avoidance easier. -->
-          <depth_camera><clip><near>0.7</near><far>12.0</far></clip></depth_camera>
-          <noise><type>gaussian</type><mean>0</mean><stddev>0.02</stddev></noise>
+          <!-- 30 m is the usable far end. Gazebo can only add constant noise, so the
+               stereo error model is scripts/depth_noise.py instead. -->
+          <depth_camera><clip><near>0.7</near><far>30.0</far></clip></depth_camera>
           <distortion>
             <k1>0</k1><k2>0</k2><k3>0</k3><p1>0</p1><p2>0</p2>
             <center>0.5 0.5</center>

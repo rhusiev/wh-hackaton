@@ -275,8 +275,8 @@ it is a depthai pipeline setting, not something the sim models.
 
 ## Detection range is limited by pixels, not by the depth sensor
 
-The stereo pair ranges to 12 m, so it is tempting to plan the search pattern
-around 12 m. A person detector cannot use that range.
+The stereo pair ranges to 12 m reliably and 30 m usably, so it is tempting to
+plan the search pattern around that. A person detector cannot use that range.
 
 With `horizontal_fov` 1.2008 rad over 640 px the focal length is
 fx = 320 / tan(0.6004) = 466 px. A person is about 0.42 m across the shoulders,
@@ -289,18 +289,25 @@ practical floor is about 24 px, which puts the real detection horizon at
 `scripts/spatial_detector.py` enforces this with its `min_pixel_width`
 parameter, so the simulated detector goes quiet at the same range the real one
 does. Aisle spacing in the search pattern should be sized off 8 m, not 12 m.
+Only larger targets benefit from the 12-30 m depth.
 
 ## Gazebo's depth noise is the wrong shape for stereo
 
 `<noise><stddev>` on a depth camera is a constant in metres. Real stereo error
 grows with the square of range, because depth is inversely proportional to
-disparity: σ_z ≈ z²·σ_d/(b·f), which for a 7.5 cm baseline and 1/8 px disparity
-resolution gives roughly 2 % of range. The 0.02 m in the model is a compromise
-that is pessimistic up close and far too optimistic at 10 m.
+disparity: σ_z ≈ z²·σ_d/(b·f). For a 7.5 cm baseline, fx 466 px and 1/8 px
+disparity resolution that is 9 cm at 5 m, 0.5 m at 12 m and 3.2 m at 30 m.
 
-`scripts/spatial_detector.py` applies the range-dependent term itself
-(σ = 0.01 + 0.015·z) so that at least the object positions degrade realistically.
-Anything consuming the raw depth image does not get this.
+So the model has no Gazebo noise. Gazebo publishes clean depth to
+`/camera/depth/ideal/image_raw`, and `scripts/depth_noise.py` republishes it on
+`/camera/depth/image_raw` with the z² error, correlated over 8×8 px patches like
+stereo matching errors. Past 12 m patches also drop out, up to 50 % at 30 m.
+The constants live in `scripts/stereo.py`, shared with the detector and demo.
+It costs about 0.3 core at 15 Hz.
+
+Everything downstream sees 0.7-30 m depth, but the scan for avoidance is still
+capped at 12 m in `launch/perception.launch.py`. Past that the error is bigger
+than the avoidance margin.
 
 ## Remaps do not reach mavros plugin sub-nodes
 

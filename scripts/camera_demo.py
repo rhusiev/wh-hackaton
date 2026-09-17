@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Show the OAK-D colour image next to its depth, false-coloured over the 0.7-12 m range.
+"""Show the OAK-D colour image next to its depth, false-coloured over the 0.7-30 m range.
 
     ./run.sh demo                  # live window
     ./run.sh demo --save demo.png  # write one frame and exit, for headless hosts
@@ -16,14 +16,16 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image
 
-DEPTH_MIN = 0.7
-DEPTH_MAX = 12.0
+from stereo import DEPTH_MAX, DEPTH_MIN
 
 
 def colourize(depth: np.ndarray) -> np.ndarray:
-    scaled = (np.clip(depth, DEPTH_MIN, DEPTH_MAX) - DEPTH_MIN) / (DEPTH_MAX - DEPTH_MIN)
+    # Square root, so the near metres that matter for flying keep most of the colours.
+    valid = np.isfinite(depth)
+    scaled = np.sqrt((np.clip(np.where(valid, depth, DEPTH_MAX), DEPTH_MIN, DEPTH_MAX) - DEPTH_MIN)
+                     / (DEPTH_MAX - DEPTH_MIN))
     image = cv2.applyColorMap((255 * (1 - scaled)).astype(np.uint8), cv2.COLORMAP_TURBO)
-    image[~np.isfinite(depth)] = 0  # outside the stereo range
+    image[~valid] = 0  # no stereo match or outside the range
     return image
 
 
