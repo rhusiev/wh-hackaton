@@ -16,6 +16,8 @@ from rclpy.qos import QoSDurabilityPolicy, QoSProfile, qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer, TransformListener
 
+from geometry import yaw
+
 HIT, MISS = 0.85, -0.4
 LOG_ODDS_MIN, LOG_ODDS_MAX = -2.0, 3.5
 
@@ -56,10 +58,10 @@ class GridMapper(Node):
                                    throttle_duration_sec=5.0)
             return
         t, q = tf.transform.translation, tf.transform.rotation
-        yaw = np.arctan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
+        heading = yaw(q)
 
         ranges = np.asarray(scan.ranges, dtype=np.float32)
-        angles = yaw + scan.angle_min + scan.angle_increment * np.arange(len(ranges))
+        angles = heading + scan.angle_min + scan.angle_increment * np.arange(len(ranges))
         hit = np.isfinite(ranges)
         # inf is "nothing inside the range", NaN or too close is no answer at all.
         usable = hit | (np.isinf(ranges) & (ranges > 0))

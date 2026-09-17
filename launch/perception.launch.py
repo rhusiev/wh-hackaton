@@ -1,5 +1,8 @@
 """Perception and AR stack: depth -> obstacles, targets, minimap.
 
+Every module talks only over the topics in docs/DESIGN.md, so each can be switched
+off here and replaced by your own node: detector:=none, mapper:=false, ar:=false.
+
 Rates and resolutions here are sized for the Raspberry Pi 5 that carries this on
 the real aircraft, not for the desktop running the simulator. Raising them will
 look better in RViz and will not run on the drone.
@@ -9,7 +12,7 @@ from pathlib import Path
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess
-from launch.conditions import IfCondition, UnlessCondition
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 
@@ -38,6 +41,9 @@ def generate_launch_description() -> LaunchDescription:
         # yolo runs the real network on the colour image, truth reads the true
         # positions of the people and is nearly free.
         DeclareLaunchArgument("detector", default_value="yolo", choices=["yolo", "truth", "none"]),
+        # The known-pose grid mapper; with slam:=true RTAB-Map publishes /map instead.
+        DeclareLaunchArgument("mapper", default_value="true", choices=["true", "false"]),
+        DeclareLaunchArgument("ar", default_value="true", choices=["true", "false"]),
     ]
 
     # ArduPilot's proximity/avoidance wants a flat scan. The slice is taken in
@@ -74,13 +80,15 @@ def generate_launch_description() -> LaunchDescription:
     ar_bridge = ExecuteProcess(
         cmd=_script("ar_bridge.py", "--port", LaunchConfiguration("ar_port")),
         output="screen",
+        condition=IfCondition(LaunchConfiguration("ar")),
     )
 
     scan_relay = ExecuteProcess(cmd=_script("scan_relay.py"), output="screen")
 
-    # RTAB-Map publishes /map itself, otherwise the scan and the true pose do.
-    grid_mapper = ExecuteProcess(cmd=_script("grid_mapper.py"), output="screen",
-                                 condition=UnlessCondition(slam))
+    grid_mapper = ExecuteProcess(
+        cmd=_script("grid_mapper.py"), output="screen",
+        condition=IfCondition(PythonExpression(
+            ["'", LaunchConfiguration("mapper"), "' == 'true' and '", slam, "' != 'true'"])))
 
     # Visual odometry and the 2D grid the AR minimap is drawn from. Decimation
     # and the feature cap are the Pi 5 budget, not a quality choice.

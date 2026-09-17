@@ -130,13 +130,18 @@ This is the part the idea actually needs, and it is four pieces:
    to 5 Hz. The network gives a person box and 17 body points. The head box is
    built from the face points, or from the shoulders when the person faces
    away. The person's distance is the median depth over their torso plus
-   0.15 m, because the depth sees the front of the body. With
+   0.15 m, because the depth sees the front of the body. The 3D position is
+   skipped, and only the 2D box sent, in two cases. One is a person past 12 m,
+   where the stereo error is over 0.5 m. The other is a torso whose depth
+   spread (interquartile range) is over 0.4 m plus the stereo noise. That is a
+   box over two people, or over a person and a rack. With
    `detector:=truth`, `scripts/spatial_detector.py` reads
    `worlds/warehouse_targets.json` instead and keeps what the camera could see.
 3. **Targets → tracks.** `scripts/ar_bridge.py` transforms detections into the
-   map frame and fuses each into the nearest track of its label within 1 m, or
-   starts a new one. A track is only sent after
-   6 sightings, and a "person" whose top is above 2.3 m is dropped. This is the point of the
+   map frame and hands them to a tracker (`scripts/tracker.py`). Each sighting
+   joins the nearest track of its label within 1 m, or starts a new one. Two
+   tracks that drift within 1 m of each other are merged. A track is only sent
+   after 6 sightings, and a "person" whose top is above 2.3 m is dropped. This is the point of the
    whole thing: a person seen once down an aisle stays on the minimap after the
    drone has flown past, which is what "бачити людину за стінкою" means.
 4. **Tracks → Spectacles.** The same node serves a WebSocket on port 8790 at
@@ -161,7 +166,7 @@ Fly with:
 ```bash
 ./run.sh explore --altitude 2.5        # lawnmower over all five lanes
 ./run.sh explore --lanes 2             # just the first two, for a quick demo
-./run.sh explore --frontier            # no known layout, explore the map's unknown edges
+./run.sh explore --strategy frontier   # no known layout, explore the map's unknown edges
 ./run.sh score                         # found / missed / false against the true positions
 ```
 
@@ -171,14 +176,52 @@ finds the nearest reachable group of frontier cells by breadth-first search, and
 flies there in legs of at most 3 m, facing the direction of travel. The scan only
 covers what the camera faces. At each frontier it turns toward the unknown
 space. A frontier it has visited or failed to reach is skipped within 1.5 m. It
-stops when no frontier is left or after `--max-time` (600 s). In one test run
-it flew 34 legs and found all 6 people, each within 0.25 m and with a head. Each
-real person had 18 or more sightings. The 8 false tracks had 2-5, and were a
-person's noisy depth splitting off ~1 m away, so the 6-sighting filter removes them
+stops when no frontier is left or after `--max-time` (600 s). In test runs it
+flew 34-42 legs in about 4 min and found all 6 people, each within 0.25 m and
+with a head. False people went away in steps:
 
-To move this to the real aircraft, delete `person_detector.py` and run
+1. With a 2-sighting minimum there were 8 false tracks, with 2-5 sightings
+   each. Each was a real person's noisy depth splitting off ~1 m away. Real
+   people had 18 or more
+2. With a 6-sighting minimum, 2 remained. Both were person_5 seen from
+   25-30 m, so 3D positions past 12 m were dropped
+3. Then 2 remained again. One was a second track on person_5 that started
+   before either position settled. The other was a person box whose torso
+   depth mixed near and far
+4. With track merging and the torso spread check, 0 remained. person_3 had
+   only 6 sightings, exactly the minimum, so a shorter look would miss them. The
+   next run did: it flew 26 legs, saw person_3 too briefly and found 5 of 6
+
+To move this to the real aircraft, run with `detector:=none` and start
 `depthai_ros_driver` instead. It publishes the same `Detection3DArray`, so
 `ar_bridge.py` and the Lens do not change.
+
+## Swapping a part
+
+Every part talks to the next only through topics or a small Python interface, so
+each one can be replaced without touching the others.
+
+| Part | Contract | Built in | Replace with |
+|---|---|---|---|
+| Detector node | publishes `/oak/spatial_detections` (and `/oak/detections_2d`), person and head share an id | `person_detector.py`, `spatial_detector.py` | `detector:=none` and run your own node, e.g. `depthai_ros_driver` |
+| Detector network | `person_network.PersonNetwork`: called with an RGB image, returns `Person(box, score, head)` | `person_network:PoseNetwork` | parameter `network` (built with `model`, `threads`, `min_score`, `min_keypoint`), or only `model` for other YOLO-pose weights |
+| Mapper | publishes `/map` as `nav_msgs/OccupancyGrid` in `map` | `grid_mapper.py`, RTAB-Map with `slam:=true` | `mapper:=false` and run your own node |
+| Tracker | `tracker.Tracker`: `update(sightings, now)` and `targets(now)` | `tracker:NearestTracker` | parameter `tracker` (built with `merge_radius`, `min_hits`, `max_top`, `timeout`) |
+| AR server | serves the JSON above on port 8790 | `ar_bridge.py` | `ar:=false` and serve your own |
+| Exploration | a class built from the parsed arguments with `run(flight)`, optional static `add_arguments(parser)` | `sweep`, `frontier` | `./run.sh explore --strategy my_search.py:MySearch` |
+| Flight | `flight.Flight`: `here`, `heading`, `grid`, `fly_to`, `turn`, over MAVROS in GUIDED | `flight.py` | subclass it for another autopilot link; strategies do not change |
+
+Parameters are set by starting the node yourself with its launch part off:
+
+```bash
+./run.sh sim sitl:=true detector:=none
+./run.sh python3 scripts/person_detector.py --ros-args -p network:=my_net.py:MyNet
+```
+
+`module:Class` names an importable module in `scripts/`; `path/to/file.py:Class`
+loads a file from anywhere (`scripts/plugin.py`). The drone's pose comes from the
+`map` -> `base_link` transform everywhere, which is ground truth in the sim and
+SLAM on the aircraft.
 
 ## Multi-robot and GPS-denied
 

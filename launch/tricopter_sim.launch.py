@@ -64,6 +64,8 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument("perception", default_value="true", choices=["true", "false"]),
         DeclareLaunchArgument("slam", default_value="false", choices=["true", "false"]),
         DeclareLaunchArgument("detector", default_value="yolo", choices=["yolo", "truth", "none"]),
+        DeclareLaunchArgument("mapper", default_value="true", choices=["true", "false"]),
+        DeclareLaunchArgument("ar", default_value="true", choices=["true", "false"]),
         DeclareLaunchArgument("ar_port", default_value="8790"),
         DeclareLaunchArgument("rviz", default_value="false", choices=["true", "false"]),
         DeclareLaunchArgument("foxglove", default_value="false", choices=["true", "false"]),
@@ -224,6 +226,8 @@ def generate_launch_description() -> LaunchDescription:
         launch_arguments=[
             ("slam", LaunchConfiguration("slam")),
             ("detector", LaunchConfiguration("detector")),
+            ("mapper", LaunchConfiguration("mapper")),
+            ("ar", LaunchConfiguration("ar")),
             ("ar_port", LaunchConfiguration("ar_port")),
         ],
         condition=IfCondition(LaunchConfiguration("perception")),

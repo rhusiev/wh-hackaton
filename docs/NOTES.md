@@ -427,8 +427,8 @@ slower.
 
 `/mavros/local_position/pose` always carries the orientation 0, 0, 0, 1. MAVROS
 fills it from the imu plugin, and that plugin is not in the plugin allowlist.
-The position is correct. `scripts/explore.py` reads yaw from `/ground_truth/odom`
-instead. Before this, turning in place waited forever for a yaw that never came
+The position is correct. `scripts/flight.py` reads yaw from the `map` ->
+`base_link` transform instead. Before this, turning in place waited forever for a yaw that never came
 
 ## ArduCopter will not arm without the proximity scan
 

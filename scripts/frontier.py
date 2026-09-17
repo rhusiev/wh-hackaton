@@ -2,16 +2,28 @@
 
 A frontier is known free space next to unknown space. Flying to the nearest one
 and looking into the unknown grows the map until no reachable frontier is left.
+plan() is the planner on its own; FrontierExplorer flies it.
 """
 
 from __future__ import annotations
 
+import argparse
 import math
 from collections import deque
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 from scipy import ndimage
+
+if TYPE_CHECKING:
+    from flight import Flight
+
+# Legs are short so each plan uses the map the last leg revealed.
+LEG = 3.0
+CLEARANCE = 0.8          # arm tip is 0.4 m from the centre, the rest is position error
+MIN_CELLS = 4
+VISITED_RADIUS = 1.5     # a frontier still unknown after looking at it is given up
 
 UNKNOWN = -1
 OCCUPIED = 50
@@ -131,3 +143,50 @@ def plan(grid: Grid, start: tuple[float, float], clearance: float, min_cells: in
     ur, uc = np.nonzero(near)
     look = math.atan2(ur.mean() - goal[0], uc.mean() - goal[1]) if ur.size else 0.0
     return Goal([grid.point(*cell) for cell in corners], look)
+
+
+class FrontierExplorer:
+    @staticmethod
+    def add_arguments(parser: argparse.ArgumentParser) -> None:
+        parser.add_argument("--max-time", type=float, default=600.0,
+                            help="give up after this many seconds")
+
+    def __init__(self, args: argparse.Namespace) -> None:
+        self.max_time = args.max_time
+
+    def run(self, flight: Flight) -> None:
+        log = flight.get_logger()
+        flight.require(lambda: flight.map is not None, "/map")
+        for _ in range(4):
+            flight.turn(math.remainder(flight.heading() + math.pi / 2, math.tau))
+
+        deadline = flight.get_clock().now().nanoseconds + int(self.max_time * 1e9)
+        visited: list[tuple[float, float]] = []
+        while flight.get_clock().now().nanoseconds < deadline:
+            here = flight.here()
+            goal = plan(flight.grid(), here, CLEARANCE, MIN_CELLS, visited, VISITED_RADIUS)
+            if goal is None:
+                log.info("no reachable frontier left, holding")
+                return
+
+            if goal.path:
+                x, y = goal.path[0]
+                distance = math.dist(here, (x, y))
+                if distance > LEG:
+                    x, y = (here[0] + (x - here[0]) * LEG / distance,
+                            here[1] + (y - here[1]) * LEG / distance)
+                final = len(goal.path) == 1 and distance <= LEG
+                log.info(f"leg to map ({x:.1f}, {y:.1f}), frontier at "
+                         f"({goal.path[-1][0]:.1f}, {goal.path[-1][1]:.1f})")
+                # Face the leg first: the obstacle scan only covers what the camera sees.
+                heading = math.atan2(y - here[1], x - here[0])
+                flight.turn(heading)
+                if not flight.fly_to(x, y, heading):
+                    log.warn("leg timed out, giving up on that frontier")
+                    visited.append(goal.path[-1])
+                    continue
+                if not final:
+                    continue
+            flight.turn(goal.look_yaw)
+            visited.append(flight.here())
+        log.info(f"stopped after {self.max_time:.0f} s, holding")

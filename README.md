@@ -36,7 +36,7 @@ Then open two terminals in the project folder:
 ```
 
 The Gazebo window shows the drone take off and sweep all five aisles.
-`./run.sh explore --frontier` instead explores with no prior layout: it flies
+`./run.sh explore --strategy frontier` instead explores with no prior layout: it flies
 toward whatever part of the map is still unknown
 
 To check that everything works, or to see what the drone and the glasses see:
@@ -50,6 +50,9 @@ To check that everything works, or to see what the drone and the glasses see:
 
 To build the image yourself instead of pulling, run `./run.sh build` (20-40 min)
 
+Each part - detector network, tracker, mapper, exploration strategy - can be
+replaced with your own, see "Swapping a part" in `docs/DESIGN.md`
+
 Stop with Ctrl+C in terminal 1, and `./run.sh down` to remove the container
 
 ## Common options
@@ -60,6 +63,7 @@ Stop with Ctrl+C in terminal 1, and `./run.sh down` to remove the container
 ./run.sh sim sitl:=true depth_decimation:=1 # full-resolution depth (default 4 = 160x100)
 ./run.sh sim sitl:=true slam:=true          # RTAB-Map builds /map instead of the known-pose mapper
 ./run.sh sim sitl:=true detector:=truth     # read true positions instead of running YOLO, saves ~1 core
+./run.sh sim sitl:=true detector:=none      # no detector, run your own (also mapper:=false, ar:=false)
 ./run.sh explore --lanes 2                  # shorter demo flight
 ./run.sh demo --save frame.png              # one frame to a file, no window needed
 ./run.sh preview --viewer -15 0 0           # glasses view from x, y, yaw

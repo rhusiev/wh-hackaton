@@ -19,6 +19,9 @@ Payload, all lengths in metres in the map frame:
 A target is a box standing on the floor: centre x, y, z and height h. "head" is
 present once the detector has seen a head for it. "map" is present only while
 something publishes /map.
+
+The fusing is tracker.py's NearestTracker; the tracker parameter ("module:Class" or
+"path/to/file.py:Class") swaps it for anything with the same update and targets.
 """
 
 from __future__ import annotations
@@ -27,7 +30,6 @@ import argparse
 import asyncio
 import base64
 import json
-import math
 import threading
 
 import numpy as np
@@ -37,32 +39,11 @@ from rclpy.node import Node
 from tf2_ros import Buffer, TransformListener
 from vision_msgs.msg import Detection3DArray
 
+from geometry import quat_to_matrix, yaw
+from plugin import load
+from tracker import Sighting, Tracker
+
 MAP_PERIOD = 1.0
-
-
-class Track:
-    __slots__ = ("id", "label", "xyz", "height", "head", "score", "hits", "last_seen")
-
-    def __init__(self, track_id: int, label: str, xyz: np.ndarray, height: float, score: float,
-                 now: float):
-        self.id, self.label = track_id, label
-        self.xyz, self.height, self.head = xyz, height, None
-        self.score, self.hits, self.last_seen = score, 1, now
-
-    def update(self, xyz: np.ndarray, height: float, score: float, now: float) -> None:
-        # Running mean: repeated looks at the same person cancel the stereo noise.
-        self.hits += 1
-        self.xyz += (xyz - self.xyz) / self.weight()
-        self.height += (height - self.height) / self.weight()
-        self.score = max(self.score, score)
-        self.last_seen = now
-
-    def update_head(self, head: np.ndarray) -> None:
-        """head is x, y, z and size, from the same frame as the latest update."""
-        self.head = head if self.head is None else self.head + (head - self.head) / self.weight()
-
-    def weight(self) -> int:
-        return min(self.hits, 20)
 
 
 class ArBridge(Node):
@@ -71,6 +52,7 @@ class ArBridge(Node):
         self.declare_parameters("", [
             ("map_frame", "map"),
             ("body_frame", "base_link"),
+            ("tracker", "tracker:NearestTracker"),
             ("merge_radius", 1.0),
             ("track_timeout", 0.0),
             # About 1.5 s in view at 4 Hz; stray depth splits of a real person rarely reach it.
@@ -79,13 +61,11 @@ class ArBridge(Node):
             ("max_top", 2.3),
         ])
         self.map_frame, self.body_frame = self._p("map_frame"), self._p("body_frame")
-        self.merge_radius = self._p("merge_radius")
-        self.track_timeout = self._p("track_timeout")
-        self.min_hits, self.max_top = self._p("min_hits"), self._p("max_top")
+        self.tracker: Tracker = load(self._p("tracker"))(
+            merge_radius=self._p("merge_radius"), min_hits=self._p("min_hits"),
+            max_top=self._p("max_top"), timeout=self._p("track_timeout"))
 
         self.lock = threading.Lock()
-        self.tracks: list[Track] = []
-        self.next_id = 0
         self.grid: dict | None = None
         self.last_grid = 0.0
 
@@ -114,42 +94,28 @@ class ArBridge(Node):
                                    throttle_duration_sec=5.0)
             return
 
-        q = tf.transform.rotation
-        rot = _quat_to_matrix(q)
-        trans = np.array([tf.transform.translation.x,
-                          tf.transform.translation.y,
-                          tf.transform.translation.z])
-        now = self.now()
+        rot = quat_to_matrix(tf.transform.rotation)
+        t = tf.transform.translation
+        trans = np.array([t.x, t.y, t.z])
+        # A head shares its detection id with the person it belongs to, within a frame.
+        sightings: dict[str, Sighting] = {}
+        heads: dict[str, np.ndarray] = {}
+        for det in msg.detections:
+            if not det.results:
+                continue
+            c = det.bbox.center.position
+            xyz = rot @ np.array([c.x, c.y, c.z]) + trans
+            hypothesis = det.results[0].hypothesis
+            # Sizes are in the camera's optical axes, where y points down the image.
+            if hypothesis.class_id == "head":
+                heads[det.id] = np.append(xyz, det.bbox.size.y)
+            else:
+                sightings[det.id] = Sighting(hypothesis.class_id, xyz, det.bbox.size.y,
+                                             hypothesis.score, None)
+        for det_id, sighting in sightings.items():
+            sighting.head = heads.get(det_id)
         with self.lock:
-            # A head shares its detection id with the person it belongs to, within a frame.
-            people, heads = {}, []
-            for det in msg.detections:
-                if not det.results:
-                    continue
-                c = det.bbox.center.position
-                xyz = rot @ np.array([c.x, c.y, c.z]) + trans
-                hypothesis = det.results[0].hypothesis
-                # Sizes are in the camera's optical axes, where y points down the image.
-                if hypothesis.class_id == "head":
-                    heads.append((det.id, np.append(xyz, det.bbox.size.y)))
-                elif xyz[2] + det.bbox.size.y / 2 <= self.max_top:
-                    people[det.id] = self.absorb(xyz, det.bbox.size.y, hypothesis, now)
-            for det_id, head in heads:
-                if det_id in people:
-                    people[det_id].update_head(head)
-
-    def absorb(self, xyz: np.ndarray, height: float, hypothesis, now: float) -> Track:
-        # The nearest track, not the first in range: two people 1.5 m apart must not share one.
-        near = [(np.linalg.norm(t.xyz[:2] - xyz[:2]), t) for t in self.tracks
-                if t.label == hypothesis.class_id]
-        distance, track = min(near, key=lambda pair: pair[0], default=(math.inf, None))
-        if distance < self.merge_radius:
-            track.update(xyz, height, hypothesis.score, now)
-            return track
-        track = Track(self.next_id, hypothesis.class_id, xyz, height, hypothesis.score, now)
-        self.tracks.append(track)
-        self.next_id += 1
-        return track
+            self.tracker.update(list(sightings.values()), self.now())
 
     def on_map(self, msg: OccupancyGrid) -> None:
         now = self.now()
@@ -177,41 +143,16 @@ class ArBridge(Node):
             t, q = tf.transform.translation, tf.transform.rotation
             payload["drone"] = {
                 "x": round(t.x, 3), "y": round(t.y, 3), "z": round(t.z, 3),
-                "yaw": round(math.atan2(2 * (q.w * q.z + q.x * q.y),
-                                        1 - 2 * (q.y * q.y + q.z * q.z)), 4),
+                "yaw": round(yaw(q), 4),
             }
         except Exception:
             pass
 
         with self.lock:
-            if self.track_timeout > 0:
-                self.tracks = [t for t in self.tracks
-                               if now - t.last_seen < self.track_timeout]
-            payload["targets"] = [_target(t, now) for t in self.tracks
-                                  if t.hits >= self.min_hits]
+            payload["targets"] = self.tracker.targets(now)
             if self.grid is not None:
                 payload["map"] = self.grid
         return json.dumps(payload, separators=(",", ":"))
-
-
-def _target(track: Track, now: float) -> dict:
-    x, y, z = (round(float(c), 3) for c in track.xyz)
-    target = {"id": track.id, "label": track.label, "x": x, "y": y, "z": z,
-              "h": round(track.height, 3), "score": round(track.score, 3),
-              "age": round(now - track.last_seen, 2), "hits": track.hits}
-    if track.head is not None:
-        target["head"] = dict(zip(("x", "y", "z", "size"),
-                                  (round(float(c), 3) for c in track.head)))
-    return target
-
-
-def _quat_to_matrix(q) -> np.ndarray:
-    x, y, z, w = q.x, q.y, q.z, q.w
-    return np.array([
-        [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
-        [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
-        [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
-    ])
 
 
 async def serve(node: ArBridge, host: str, port: int, rate: float) -> None:

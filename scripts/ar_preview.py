@@ -89,6 +89,7 @@ def wallhack(frame: dict, viewer: tuple[float, float, float]) -> np.ndarray:
                       colour, 2)
         return depth
 
+    labels: list[tuple[int, int, int, int]] = []
     for target in sorted(frame["targets"], key=lambda t: -math.dist((t["x"], t["y"]), (vx, vy))):
         depth = box(target["x"], target["y"], target["z"], 0.5, target["h"], PERSON)
         if depth is None:
@@ -97,8 +98,15 @@ def wallhack(frame: dict, viewer: tuple[float, float, float]) -> np.ndarray:
             head = target["head"]
             box(head["x"], head["y"], head["z"], head["size"], head["size"], HEAD)
         u, v, _ = project(target["x"], target["y"], target["z"] + target["h"] / 2)
-        cv2.putText(image, f"#{target['id']} {math.dist((target['x'], target['y']), (vx, vy)):.1f} m",
-                    (int(u) - 25, int(v) - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.45, PERSON, 1)
+        text = f"#{target['id']} {math.dist((target['x'], target['y']), (vx, vy)):.1f} m"
+        (w, h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+        x, y = int(u) - w // 2, int(v) - 20
+        # Move up past every label already drawn that it would overlap.
+        while any(x < lx + lw and lx < x + w and y - h - 2 < ly and ly - lh - 2 < y
+                  for lx, ly, lw, lh in labels):
+            y -= h + 4
+        labels.append((x, y, w, h))
+        cv2.putText(image, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.45, PERSON, 1)
     cv2.putText(image, f"{len(frame['targets'])} people", (10, 20),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
     return image

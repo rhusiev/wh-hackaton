@@ -35,16 +35,8 @@ from vision_msgs.msg import (
 )
 from visualization_msgs.msg import Marker, MarkerArray
 
+from geometry import quat_to_matrix
 from stereo import DEPTH_MAX, DEPTH_MIN, DEPTH_RELIABLE, sigma
-
-
-def quat_to_matrix(q) -> np.ndarray:
-    x, y, z, w = q.x, q.y, q.z, q.w
-    return np.array([
-        [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
-        [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
-        [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
-    ])
 
 
 class SpatialDetector(Node):
