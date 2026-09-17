@@ -9,8 +9,8 @@ from pathlib import Path
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess
-from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration
+from launch.conditions import IfCondition, UnlessCondition
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -35,7 +35,9 @@ def generate_launch_description() -> LaunchDescription:
     args = [
         DeclareLaunchArgument("slam", default_value="false", choices=["true", "false"]),
         DeclareLaunchArgument("ar_port", default_value="8790"),
-        DeclareLaunchArgument("detector", default_value="true", choices=["true", "false"]),
+        # yolo runs the real network on the colour image, truth reads the true
+        # positions of the people and is nearly free.
+        DeclareLaunchArgument("detector", default_value="yolo", choices=["yolo", "truth", "none"]),
     ]
 
     # ArduPilot's proximity/avoidance wants a flat scan. The slice is taken in
@@ -62,11 +64,12 @@ def generate_launch_description() -> LaunchDescription:
         }],
     )
 
-    detector = ExecuteProcess(
-        cmd=_script("spatial_detector.py"),
-        output="screen",
-        condition=IfCondition(LaunchConfiguration("detector")),
-    )
+    detector = LaunchConfiguration("detector")
+    detectors = [
+        ExecuteProcess(cmd=_script(script), output="screen",
+                       condition=IfCondition(PythonExpression(["'", detector, f"' == '{name}'"])))
+        for name, script in (("yolo", "person_detector.py"), ("truth", "spatial_detector.py"))
+    ]
 
     ar_bridge = ExecuteProcess(
         cmd=_script("ar_bridge.py", "--port", LaunchConfiguration("ar_port")),
@@ -74,6 +77,10 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     scan_relay = ExecuteProcess(cmd=_script("scan_relay.py"), output="screen")
+
+    # RTAB-Map publishes /map itself, otherwise the scan and the true pose do.
+    grid_mapper = ExecuteProcess(cmd=_script("grid_mapper.py"), output="screen",
+                                 condition=UnlessCondition(slam))
 
     # Visual odometry and the 2D grid the AR minimap is drawn from. Decimation
     # and the feature cap are the Pi 5 budget, not a quality choice.
@@ -127,4 +134,4 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     return LaunchDescription(
-        args + [to_scan, scan_relay, detector, ar_bridge, visual_odometry, rtabmap])
+        args + [to_scan, scan_relay, grid_mapper, *detectors, ar_bridge, visual_odometry, rtabmap])

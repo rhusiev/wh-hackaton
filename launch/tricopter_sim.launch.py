@@ -63,12 +63,14 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument("fcu_url", default_value="udp://:14551@"),
         DeclareLaunchArgument("perception", default_value="true", choices=["true", "false"]),
         DeclareLaunchArgument("slam", default_value="false", choices=["true", "false"]),
+        DeclareLaunchArgument("detector", default_value="yolo", choices=["yolo", "truth", "none"]),
         DeclareLaunchArgument("ar_port", default_value="8790"),
         DeclareLaunchArgument("rviz", default_value="false", choices=["true", "false"]),
         DeclareLaunchArgument("foxglove", default_value="false", choices=["true", "false"]),
     ]
 
-    env = [_prepend("GZ_SIM_RESOURCE_PATH", f"{ROOT / 'models'}:{ROOT / 'worlds'}")]
+    models = ":".join(str(p) for p in (ROOT / "models", ROOT / "models" / "people", ROOT / "worlds"))
+    env = [_prepend("GZ_SIM_RESOURCE_PATH", models)]
 
     gz_sim = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -221,6 +223,7 @@ def generate_launch_description() -> LaunchDescription:
         PythonLaunchDescriptionSource(str(ROOT / "launch" / "perception.launch.py")),
         launch_arguments=[
             ("slam", LaunchConfiguration("slam")),
+            ("detector", LaunchConfiguration("detector")),
             ("ar_port", LaunchConfiguration("ar_port")),
         ],
         condition=IfCondition(LaunchConfiguration("perception")),

@@ -85,6 +85,10 @@ RUN git clone --depth 1 --branch ${ARDUPILOT_GAZEBO_REF} \
     && cmake --build /tmp/ardupilot_gazebo/build --target install \
     && rm -rf /tmp/ardupilot_gazebo
 
+# The person detector's network runtime. Its own layer, so adding it did not
+# invalidate the ArduPilot build above.
+RUN pip3 install --no-cache-dir --break-system-packages onnxruntime
+
 ENV PATH=${ARDUPILOT_HOME}/Tools/autotest:${ARDUPILOT_HOME}/build/sitl/bin:$PATH
 ENV GZ_SIM_SYSTEM_PLUGIN_PATH=${ARDUPILOT_GAZEBO_HOME}/lib/ardupilot_gazebo
 ENV GZ_SIM_RESOURCE_PATH=${ARDUPILOT_GAZEBO_HOME}/share/ardupilot_gazebo/models:${ARDUPILOT_GAZEBO_HOME}/share/ardupilot_gazebo/worlds

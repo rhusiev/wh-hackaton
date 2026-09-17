@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the warehouse world from primitives, with no Fuel downloads."""
+"""Generate the warehouse world from primitives and the people in models/people."""
 
 from __future__ import annotations
 
@@ -39,7 +39,9 @@ TARGET_SPOTS = (
     (-7.8, -1.4, 1.57, "occluded"),
     (12.5, -7.0, 0.8, "corner"),
 )
-TORSO_Z = 1.15
+# Fuel meshes (CC BY 4.0), feet at the origin, ~1.6 m tall.
+PEOPLE = ("Nurse", "FemaleVisitor", "Scrubs")
+PERSON_SIZE = (0.5, 0.4, 1.62)
 
 
 @dataclass(frozen=True)
@@ -169,22 +171,21 @@ def obstacles(rng: random.Random) -> list[str]:
     return models
 
 
-def person(name: str, x: float, y: float, yaw: float) -> str:
-    """A standing figure in a hi-vis vest, sized so a person detector would fire."""
-    return static_model(name, (x, y, 0.0), [
-        Box("legs", (0, 0, 0.40), (0.34, 0.24, 0.80), (0.18, 0.20, 0.30), yaw=yaw),
-        Box("torso", (0, 0, TORSO_Z), (0.42, 0.28, 0.70), (0.95, 0.45, 0.05), yaw=yaw),
-        Box("head", (0, 0, 1.62), (0.20, 0.18, 0.24), (0.82, 0.66, 0.54), yaw=yaw),
-    ])
+def person(name: str, mesh: str, x: float, y: float, yaw: float) -> str:
+    return f"""    <include>
+      <uri>model://{mesh}</uri>
+      <name>{name}</name>
+      <pose>{x:.4g} {y:.4g} 0 0 0 {yaw:.4g}</pose>
+    </include>"""
 
 
 def targets() -> tuple[list[str], list[dict]]:
     models, truth = [], []
     for i, (x, y, yaw, kind) in enumerate(TARGET_SPOTS):
         name = f"person_{i}"
-        models.append(person(name, x, y, yaw))
+        models.append(person(name, PEOPLE[i % len(PEOPLE)], x, y, yaw))
         truth.append({"name": name, "label": "person", "kind": kind,
-                      "xyz": [x, y, TORSO_Z], "size": [0.42, 0.28, 0.70]})
+                      "xyz": [x, y, PERSON_SIZE[2] / 2], "size": list(PERSON_SIZE)})
     return models, truth
 
 

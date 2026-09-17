@@ -46,16 +46,17 @@ on inside it:
 - Prop wash, ground effect near shelving, or the vortex ring state you will hit
   descending in an aisle. The lift-drag model has none of it.
 
-And one that matters specifically for this idea: **Gazebo will not tell you
-whether your detector works.** Its rendering is clean, evenly lit and untextured
-compared with a real warehouse, so a network trained or tuned on these images
-will not transfer. That is why `scripts/spatial_detector.py` does not run a
-network at all - it reads the true target positions and then throws away
-everything the camera could not have seen. You get the geometry, the occlusion
-and the range limits honestly, and you develop the tracking and AR layers
-against a real message stream, without pretending the perception is solved.
+And one that matters specifically for this idea: **Gazebo only half tells you
+whether your detector works.** The people are real scanned meshes, so a network
+trained on photos does find them and their heads here. But the rendering is
+clean and evenly lit, and there are only three static people in fixed poses. A
+detector that works here can still fail on real footage with people sitting,
+moving or half hidden. `detector:=truth` swaps the network for
+`scripts/spatial_detector.py`, which reads the true positions and drops what the
+camera could not see. Use it to test tracking and AR without the network's
+misses.
 
-Train the detector on real OAK-D footage. Develop everything downstream of it
+Check the detector on real OAK-D footage. Develop everything downstream of it
 here.
 
 So: build the perception → planning → MAVLink loop here, then move it to a
@@ -77,7 +78,7 @@ companion computer and re-test the flight envelope on the real machine.
 | DJI O4 Air Unit Pro | **not modelled.** It is a pilot video downlink and carries nothing autonomy needs |
 | RadioMaster RP3 V2 ELRS | **not modelled.** SITL RC comes from MAVProxy's `rc` command |
 | Luxonis OAK-D | Gazebo `rgbd_camera`, 640×400 @ 15 Hz, 68.8° HFOV, depth 0.7–30 m (12 m reliable) |
-| OAK-D on-device YOLO | `scripts/spatial_detector.py` — same `vision_msgs/Detection3DArray` contract |
+| OAK-D on-device YOLO | `scripts/person_detector.py`, YOLO11n-pose on the CPU, same `vision_msgs/Detection3DArray` contract |
 | Raspberry Pi 5 8 GB | **not modelled as a bottleneck.** Everything runs on the desktop; the rates are picked to fit the Pi |
 | Spectacles 2024 | `scripts/ar_bridge.py` — a WebSocket of JSON the Lens draws |
 
@@ -104,9 +105,10 @@ thrust-to-weight 3.1, hover at 32% of full throttle.
 | `/ground_truth/odom` | `nav_msgs/Odometry`, exact pose straight from Gazebo |
 | `/tf` | `map` → `base_link`, also straight from Gazebo |
 | `/oak/spatial_detections` | `vision_msgs/Detection3DArray` in `camera_optical_frame` |
-| `/oak/detection_markers` | `visualization_msgs/MarkerArray` in `map`, for RViz |
+| `/oak/detections_2d` | `vision_msgs/Detection2DArray`, `person` and `head` boxes in colour pixels, a person and their head share an id |
+| `/oak/detection_markers` | `visualization_msgs/MarkerArray`, for RViz |
 | `/scan` | `sensor_msgs/LaserScan` from the depth, relayed to `/mavros/obstacle/send` for ArduPilot |
-| `/map` | `nav_msgs/OccupancyGrid`, only with `slam:=true` |
+| `/map` | `nav_msgs/OccupancyGrid` at 0.2 m, from `scripts/grid_mapper.py` using the true pose, or from RTAB-Map with `slam:=true` |
 | `ws://<host>:8790` | the AR payload, 10 Hz JSON |
 | `/mavros/state`, `/mavros/local_position/pose`, … | the usual MAVROS surface |
 
@@ -123,14 +125,17 @@ This is the part the idea actually needs, and it is four pieces:
    scan, and `scripts/scan_relay.py` hands it to mavros's `obstacle_distance`. That
    is what makes `PRX1_TYPE 2`, `AVOID_ENABLE 7` and `OA_TYPE 1` in
    `config/tricopter.parm` do anything - without the scan they are inert.
-2. **Depth → targets.** `scripts/spatial_detector.py` stands in for the OAK-D's
-   on-device network. It knows where the people are from
-   `worlds/warehouse_targets.json`, and then decides what the camera could
-   actually see: inside the frustum, 0.7–30 m, at least 24 px across, and not
-   hidden behind a rack. The occlusion test compares the predicted range with
-   the measured depth at that pixel, so it fails where the real one fails.
+2. **Colour + depth → targets.** `scripts/person_detector.py` stands in for the
+   OAK-D's on-device network. It runs YOLO11n-pose (`models/detector/`) at up
+   to 5 Hz. The network gives a person box and 17 body points. The head box is
+   built from the face points, or from the shoulders when the person faces
+   away. The person's distance is the median depth over their torso plus
+   0.15 m, because the depth sees the front of the body. With
+   `detector:=truth`, `scripts/spatial_detector.py` reads
+   `worlds/warehouse_targets.json` instead and keeps what the camera could see.
 3. **Targets → tracks.** `scripts/ar_bridge.py` transforms detections into the
-   map frame and fuses them into persistent tracks. This is the point of the
+   map frame and fuses them into persistent tracks. A track is only sent after
+   2 sightings, and a "person" whose top is above 2.3 m is dropped. This is the point of the
    whole thing: a person seen once down an aisle stays on the minimap after the
    drone has flown past, which is what "бачити людину за стінкою" means.
 4. **Tracks → Spectacles.** The same node serves a WebSocket on port 8790 at
@@ -139,23 +144,37 @@ This is the part the idea actually needs, and it is four pieces:
    ```json
    {"t": 41.2,
     "drone": {"x": -13.4, "y": 0.1, "z": 2.5, "yaw": 0.02},
-    "targets": [{"id": 0, "label": "person", "x": -9.0, "y": 0.0,
-                 "score": 0.78, "age": 1.3, "hits": 12}],
-    "map": {"res": 0.1, "w": 320, "h": 200, "x0": -16.0, "y0": -10.0,
+    "targets": [{"id": 0, "label": "person", "x": -9.0, "y": 0.0, "z": 0.8,
+                 "h": 1.6, "score": 0.78, "age": 1.3, "hits": 12,
+                 "head": {"x": -9.0, "y": 0.0, "z": 1.5, "size": 0.25}}],
+    "map": {"res": 0.2, "w": 200, "h": 200, "x0": -20.0, "y0": -20.0,
             "cells": "<base64, 0 free / 1 occupied / 2 unknown>"}}
    ```
 
-   Metres in the map frame, so the Lens only has to scale and rotate. `"map"`
-   appears once something publishes `/map`, i.e. with `slam:=true`.
+   Metres in the map frame, so the Lens only has to scale and rotate. `"head"`
+   is missing when no head was seen. `./run.sh preview` draws this payload the
+   way the glasses would.
 
-Fly the pattern with:
+Fly with:
 
 ```bash
 ./run.sh explore --altitude 2.5        # lawnmower over all five lanes
 ./run.sh explore --lanes 2             # just the first two, for a quick demo
+./run.sh explore --frontier            # no known layout, explore the map's unknown edges
+./run.sh score                         # found / missed / false against the true positions
 ```
 
-To move this to the real aircraft, delete `spatial_detector.py` and run
+Frontier exploration (`scripts/frontier.py`) works like this. A frontier is a
+known free cell next to an unknown one. The planner keeps 0.8 m from obstacles,
+finds the nearest reachable group of frontier cells by breadth-first search, and
+flies there in legs of at most 3 m, facing the direction of travel. The scan only
+covers what the camera faces. At each frontier it turns toward the unknown
+space. A frontier it has visited or failed to reach is skipped within 1.5 m. It
+stops when no frontier is left or after `--max-time` (600 s). In one test run
+it flew 42 legs, stopped after ~3.5 min and found 5 of the 6 people, each within
+0.15 m and with a head. It also reported 3 false targets, including one duplicate track.
+
+To move this to the real aircraft, delete `person_detector.py` and run
 `depthai_ros_driver` instead. It publishes the same `Detection3DArray`, so
 `ar_bridge.py` and the Lens do not change.
 
@@ -184,16 +203,17 @@ Both follow from the same two swaps:
 different layout any time:
 
 ```bash
-python3 scripts/gen_warehouse.py --seed 42
+python3 scripts/gen_warehouse.py --seed 7
 ```
 
 32 × 20 × 8 m hall, four rack rows at y = ±2.5 and ±7.5, five clear lanes at
-y = ±9.3, ±5 and 0. Everything is a primitive, so there is no Fuel download and
-it works offline. Racks carry randomised cargo boxes and the walls have painted
+y = ±9.3, ±5 and 0. The structure is primitives. The people are three
+Gazebo Fuel meshes (Nurse, FemaleVisitor, Scrubs, CC BY 4.0) vendored in
+`models/people/`, so it still works offline. Racks carry randomised cargo boxes and the walls have painted
 bands — both are there so visual odometry has something to track, which a bare
 white warehouse would not give it.
 
-Six figures in hi-vis vests are the search targets. Two stand in open aisles;
+Six standing people are the search targets. Two stand in open aisles;
 three are in the 2.6 m gaps between racks, visible only from the neighbouring
 lane; one is in a corner. The generator writes their true positions to
 `worlds/warehouse_targets.json`, which is what the detector stand-in reads.

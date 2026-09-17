@@ -164,8 +164,9 @@ class SpatialDetector(Node):
         det.bbox = BoundingBox3D()
         det.bbox.center.position = Point(x=noisy[0], y=noisy[1], z=noisy[2])
         det.bbox.center.orientation.w = 1.0
+        # World x, y, z sizes into the optical frame's right, down, forward.
         sx, sy, sz = target["size"]
-        det.bbox.size = Vector3(x=sx, y=sy, z=sz)
+        det.bbox.size = Vector3(x=sx, y=sz, z=sy)
         return det, z
 
     @staticmethod

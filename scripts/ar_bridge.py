@@ -10,12 +10,15 @@ Payload, all lengths in metres in the map frame:
 
     {"t": 1789594325.2,
      "drone": {"x": -13.4, "y": 0.1, "z": 2.0, "yaw": 0.02},
-     "targets": [{"id": 0, "label": "person", "x": -9.0, "y": 0.0,
+     "targets": [{"id": 0, "label": "person", "x": -9.0, "y": 0.0, "z": 0.81, "h": 1.62,
+                  "head": {"x": -9.0, "y": 0.02, "z": 1.5, "size": 0.22},
                   "score": 0.78, "age": 1.3, "hits": 12}],
      "map": {"res": 0.4, "w": 80, "h": 50, "x0": -16.0, "y0": -10.0,
              "cells": "<base64 of w*h bytes, 0 free / 1 occupied / 2 unknown>"}}
 
-"map" is present only while something publishes /map.
+A target is a box standing on the floor: centre x, y, z and height h. "head" is
+present once the detector has seen a head for it. "map" is present only while
+something publishes /map.
 """
 
 from __future__ import annotations
@@ -38,18 +41,28 @@ MAP_PERIOD = 1.0
 
 
 class Track:
-    __slots__ = ("id", "label", "xyz", "score", "hits", "last_seen")
+    __slots__ = ("id", "label", "xyz", "height", "head", "score", "hits", "last_seen")
 
-    def __init__(self, track_id: int, label: str, xyz: np.ndarray, score: float, now: float):
+    def __init__(self, track_id: int, label: str, xyz: np.ndarray, height: float, score: float,
+                 now: float):
         self.id, self.label = track_id, label
-        self.xyz, self.score, self.hits, self.last_seen = xyz, score, 1, now
+        self.xyz, self.height, self.head = xyz, height, None
+        self.score, self.hits, self.last_seen = score, 1, now
 
-    def update(self, xyz: np.ndarray, score: float, now: float) -> None:
+    def update(self, xyz: np.ndarray, height: float, score: float, now: float) -> None:
         # Running mean: repeated looks at the same person cancel the stereo noise.
         self.hits += 1
-        self.xyz += (xyz - self.xyz) / min(self.hits, 20)
+        self.xyz += (xyz - self.xyz) / self.weight()
+        self.height += (height - self.height) / self.weight()
         self.score = max(self.score, score)
         self.last_seen = now
+
+    def update_head(self, head: np.ndarray) -> None:
+        """head is x, y, z and size, from the same frame as the latest update."""
+        self.head = head if self.head is None else self.head + (head - self.head) / self.weight()
+
+    def weight(self) -> int:
+        return min(self.hits, 20)
 
 
 class ArBridge(Node):
@@ -60,10 +73,15 @@ class ArBridge(Node):
             ("body_frame", "base_link"),
             ("merge_radius", 1.5),
             ("track_timeout", 0.0),
+            # A single sighting is not shown; most false detections never repeat.
+            ("min_hits", 2),
+            # Nobody's head is higher than this above the floor.
+            ("max_top", 2.3),
         ])
         self.map_frame, self.body_frame = self._p("map_frame"), self._p("body_frame")
         self.merge_radius = self._p("merge_radius")
         self.track_timeout = self._p("track_timeout")
+        self.min_hits, self.max_top = self._p("min_hits"), self._p("max_top")
 
         self.lock = threading.Lock()
         self.tracks: list[Track] = []
@@ -103,22 +121,33 @@ class ArBridge(Node):
                           tf.transform.translation.z])
         now = self.now()
         with self.lock:
+            # A head shares its detection id with the person it belongs to, within a frame.
+            people, heads = {}, []
             for det in msg.detections:
                 if not det.results:
                     continue
                 c = det.bbox.center.position
                 xyz = rot @ np.array([c.x, c.y, c.z]) + trans
-                self.absorb(xyz, det.results[0].hypothesis, now)
+                hypothesis = det.results[0].hypothesis
+                # Sizes are in the camera's optical axes, where y points down the image.
+                if hypothesis.class_id == "head":
+                    heads.append((det.id, np.append(xyz, det.bbox.size.y)))
+                elif xyz[2] + det.bbox.size.y / 2 <= self.max_top:
+                    people[det.id] = self.absorb(xyz, det.bbox.size.y, hypothesis, now)
+            for det_id, head in heads:
+                if det_id in people:
+                    people[det_id].update_head(head)
 
-    def absorb(self, xyz: np.ndarray, hypothesis, now: float) -> None:
+    def absorb(self, xyz: np.ndarray, height: float, hypothesis, now: float) -> Track:
         for track in self.tracks:
             if (track.label == hypothesis.class_id
                     and np.linalg.norm(track.xyz[:2] - xyz[:2]) < self.merge_radius):
-                track.update(xyz, hypothesis.score, now)
-                return
-        self.tracks.append(Track(self.next_id, hypothesis.class_id, xyz,
-                                 hypothesis.score, now))
+                track.update(xyz, height, hypothesis.score, now)
+                return track
+        track = Track(self.next_id, hypothesis.class_id, xyz, height, hypothesis.score, now)
+        self.tracks.append(track)
         self.next_id += 1
+        return track
 
     def on_map(self, msg: OccupancyGrid) -> None:
         now = self.now()
@@ -156,16 +185,22 @@ class ArBridge(Node):
             if self.track_timeout > 0:
                 self.tracks = [t for t in self.tracks
                                if now - t.last_seen < self.track_timeout]
-            payload["targets"] = [
-                {"id": t.id, "label": t.label,
-                 "x": round(float(t.xyz[0]), 3), "y": round(float(t.xyz[1]), 3),
-                 "score": round(t.score, 3), "age": round(now - t.last_seen, 2),
-                 "hits": t.hits}
-                for t in self.tracks
-            ]
+            payload["targets"] = [_target(t, now) for t in self.tracks
+                                  if t.hits >= self.min_hits]
             if self.grid is not None:
                 payload["map"] = self.grid
         return json.dumps(payload, separators=(",", ":"))
+
+
+def _target(track: Track, now: float) -> dict:
+    x, y, z = (round(float(c), 3) for c in track.xyz)
+    target = {"id": track.id, "label": track.label, "x": x, "y": y, "z": z,
+              "h": round(track.height, 3), "score": round(track.score, 3),
+              "age": round(now - track.last_seen, 2), "hits": track.hits}
+    if track.head is not None:
+        target["head"] = dict(zip(("x", "y", "z", "size"),
+                                  (round(float(c), 3) for c in track.head)))
+    return target
 
 
 def _quat_to_matrix(q) -> np.ndarray:

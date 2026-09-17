@@ -35,13 +35,13 @@ import numpy as np
 import rclpy
 from geometry_msgs.msg import PoseStamped
 from mavros_msgs.msg import State
-from nav_msgs.msg import Odometry
+from nav_msgs.msg import OccupancyGrid, Odometry
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import CameraInfo, Image, LaserScan, PointCloud2
 from tf2_ros import Buffer, TransformListener
-from vision_msgs.msg import Detection3DArray
+from vision_msgs.msg import Detection2DArray, Detection3DArray
 
 # Must match models/tricopter/model.sdf.
 EXPECTED_FX = 466.1
@@ -69,6 +69,8 @@ class Smoke(Node):
             ("/camera/depth/points", PointCloud2),
             ("/ground_truth/odom", Odometry),
             ("/oak/spatial_detections", Detection3DArray),
+            ("/oak/detections_2d", Detection2DArray),
+            ("/map", OccupancyGrid),
             ("/scan", LaserScan),
             ("/mavros/obstacle/send", LaserScan),
             ("/mavros/state", State),
@@ -161,6 +163,8 @@ def main() -> int:
         ("/scan", 5.0, 20.0),
         ("/mavros/obstacle/send", 5.0, 20.0),
         ("/mavros/state", 0.5, 10.0),
+        ("/oak/spatial_detections", 2.0, 12.0),
+        ("/map", 0.5, 2.0),
     ):
         rate = node.rate(topic)
         report.check(topic, low <= rate <= high, f"{rate:.1f} Hz, want {low}-{high}")
@@ -211,9 +215,12 @@ def main() -> int:
                      f"({p.x:.1f}, {p.y:.1f}, {p.z:.1f})")
 
     print("\nperception")
-    detections = node.counts.get("/oak/spatial_detections", 0)
-    report.check("detector is publishing", detections > 0,
-                 f"{detections} messages in {node.sim_window:.0f} s of sim time")
+    # Only the YOLO detector has image boxes; the truth stand-in skips them.
+    if node.counts.get("/oak/detections_2d"):
+        boxes = node.last["/oak/detections_2d"].detections
+        report.check("2D detections label people and heads",
+                     all(d.results[0].hypothesis.class_id in ("person", "head") for d in boxes),
+                     f"{len(boxes)} boxes in the last frame")
     seen = node.last.get("/oak/spatial_detections")
     if seen is not None and seen.detections:
         first = seen.detections[0]

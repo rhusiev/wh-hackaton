@@ -3,8 +3,9 @@
 A wallhack for AR glasses: a scout drone looks behind the walls and racks you
 can't see past, and Spectacles draw the people it found on a minimap.
 
-This repo is its simulation. A tricopter with an OAK-D depth camera flies
-through a warehouse, detects people and streams them to the glasses. The autopilot is real
+This repo is its simulation. A tricopter with an OAK-D depth camera explores
+a warehouse, finds people and their heads with a real neural network, and
+streams where they are to the glasses. The autopilot is real
 ArduPilot firmware (SITL), the world is Gazebo Harmonic, the glue is ROS 2 Jazzy.
 Everything runs inside one Docker container
 
@@ -34,13 +35,17 @@ Then open two terminals in the project folder:
 ./run.sh explore
 ```
 
-The Gazebo window shows the drone take off and sweep all five aisles
+The Gazebo window shows the drone take off and sweep all five aisles.
+`./run.sh explore --frontier` instead explores with no prior layout: it flies
+toward whatever part of the map is still unknown
 
-To check that everything works, or to see what the camera sees:
+To check that everything works, or to see what the drone and the glasses see:
 
 ```bash
 ./run.sh smoke    # prints PASS/FAIL for every topic and link
-./run.sh demo     # window with colour and depth side by side
+./run.sh demo     # colour with people and head boxes, next to depth
+./run.sh preview  # the minimap and the through-the-wall view the glasses get
+./run.sh score    # which of the 6 hidden people were found, and how accurately
 ```
 
 To build the image yourself instead of pulling, run `./run.sh build` (20-40 min)
@@ -53,9 +58,11 @@ Stop with Ctrl+C in terminal 1, and `./run.sh down` to remove the container
 ./run.sh sim sitl:=true gui:=false          # no Gazebo window, faster
 ./run.sh sim sitl:=true rviz:=true          # RViz view of the camera, scan and detections
 ./run.sh sim sitl:=true depth_decimation:=1 # full-resolution depth (default 4 = 160x100)
-./run.sh sim sitl:=true slam:=true          # RTAB-Map, publishes the /map for the minimap
+./run.sh sim sitl:=true slam:=true          # RTAB-Map builds /map instead of the known-pose mapper
+./run.sh sim sitl:=true detector:=truth     # read true positions instead of running YOLO, saves ~1 core
 ./run.sh explore --lanes 2                  # shorter demo flight
 ./run.sh demo --save frame.png              # one frame to a file, no window needed
+./run.sh preview --viewer -15 0 0           # glasses view from x, y, yaw
 ./run.sh shell                              # a shell inside the container
 ```
 
@@ -68,10 +75,11 @@ in the second terminal. In its MAVProxy console type `mode guided`,
 | Path | What |
 | --- | --- |
 | `models/tricopter/` | the drone and its camera |
-| `worlds/` | the warehouse, regenerated with `python3 scripts/gen_warehouse.py --seed 42` |
+| `models/people/`, `models/detector/` | the people in the warehouse and the YOLO11n-pose network |
+| `worlds/` | the warehouse, regenerated with `python3 scripts/gen_warehouse.py` |
 | `config/tricopter.parm` | ArduPilot parameters. After editing run `WIPE=1 ./run.sh sitl` |
 | `launch/` | what `./run.sh sim` starts |
-| `scripts/` | detector, AR bridge (WebSocket JSON on port 8790), explore, tests |
+| `scripts/` | detector, mapper, AR bridge (WebSocket JSON on port 8790), explore, tests |
 
 The AR app connects to `ws://<host>:8790`
 

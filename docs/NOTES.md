@@ -423,3 +423,31 @@ This works because the container uses `ipc: host` and has a 16 GB `/dev/shm`.
 A process outside the container falls back to UDP, which is still correct, only
 slower.
 
+## MAVROS local position has no orientation here
+
+`/mavros/local_position/pose` always carries the orientation 0, 0, 0, 1. MAVROS
+fills it from the imu plugin, and that plugin is not in the plugin allowlist.
+The position is correct. `scripts/explore.py` reads yaw from `/ground_truth/odom`
+instead. Before this, turning in place waited forever for a yaw that never came
+
+## ArduCopter will not arm without the proximity scan
+
+With `PRX1_TYPE 2`, arming fails with `PRX1: No Data` until
+`/mavros/obstacle/send` is publishing. The scan comes from the perception
+launch, so start the sim with perception on. A takeoff command sent while
+already flying is rejected with MAV_RESULT 4
+
+## YOLO11-pose ONNX keypoint confidences are already probabilities
+
+The export `yolo export model=yolo11n-pose.pt format=onnx imgsz=416,640` has one
+output of shape (1, 56, 5460). Each column is cx, cy, w, h and the person score,
+then 17 x, y, confidence triples. Both the score and the keypoint confidences
+have the sigmoid applied already, so thresholding them at 0.5 is correct. The
+boxes come before NMS. On this machine's CPU, onnxruntime with 2 threads takes
+~86 ms a frame while the sim runs, so the detector reaches ~3.5-4 Hz of its 5 Hz
+
+## Fuel models download from the version-less URL
+
+`https://fuel.gazebosim.org/1.0/OpenRobotics/models/<name>.zip` works. The
+`/tip/files.zip` form returns 404. `MaleVisitorPhone` is a skinned DAE and
+does not render as a static include, so it is not used

@@ -4535,263 +4535,41 @@
       </link>
     </model>
 
-    <model name="person_0">
-      <static>true</static>
+    <include>
+      <uri>model://Nurse</uri>
+      <name>person_0</name>
       <pose>-9 0 0 0 0 0</pose>
-      <link name="link">
-        <visual name="legs_v">
-          <pose>0 0 0.4 0 0 0</pose>
-          <geometry><box><size>0.34 0.24 0.8</size></box></geometry>
-          <material>
-            <ambient>0.09 0.1 0.15 1</ambient>
-            <diffuse>0.18 0.2 0.3 1</diffuse>
-          </material>
-        </visual>
-        <collision name="legs_c">
-          <pose>0 0 0.4 0 0 0</pose>
-          <geometry><box><size>0.34 0.24 0.8</size></box></geometry>
-        </collision>
-        <visual name="torso_v">
-          <pose>0 0 1.15 0 0 0</pose>
-          <geometry><box><size>0.42 0.28 0.7</size></box></geometry>
-          <material>
-            <ambient>0.475 0.225 0.025 1</ambient>
-            <diffuse>0.95 0.45 0.05 1</diffuse>
-          </material>
-        </visual>
-        <collision name="torso_c">
-          <pose>0 0 1.15 0 0 0</pose>
-          <geometry><box><size>0.42 0.28 0.7</size></box></geometry>
-        </collision>
-        <visual name="head_v">
-          <pose>0 0 1.62 0 0 0</pose>
-          <geometry><box><size>0.2 0.18 0.24</size></box></geometry>
-          <material>
-            <ambient>0.41 0.33 0.27 1</ambient>
-            <diffuse>0.82 0.66 0.54 1</diffuse>
-          </material>
-        </visual>
-        <collision name="head_c">
-          <pose>0 0 1.62 0 0 0</pose>
-          <geometry><box><size>0.2 0.18 0.24</size></box></geometry>
-        </collision>
-      </link>
-    </model>
+    </include>
 
-    <model name="person_1">
-      <static>true</static>
-      <pose>4.5 5 0 0 0 0</pose>
-      <link name="link">
-        <visual name="legs_v">
-          <pose>0 0 0.4 0 0 3.14</pose>
-          <geometry><box><size>0.34 0.24 0.8</size></box></geometry>
-          <material>
-            <ambient>0.09 0.1 0.15 1</ambient>
-            <diffuse>0.18 0.2 0.3 1</diffuse>
-          </material>
-        </visual>
-        <collision name="legs_c">
-          <pose>0 0 0.4 0 0 3.14</pose>
-          <geometry><box><size>0.34 0.24 0.8</size></box></geometry>
-        </collision>
-        <visual name="torso_v">
-          <pose>0 0 1.15 0 0 3.14</pose>
-          <geometry><box><size>0.42 0.28 0.7</size></box></geometry>
-          <material>
-            <ambient>0.475 0.225 0.025 1</ambient>
-            <diffuse>0.95 0.45 0.05 1</diffuse>
-          </material>
-        </visual>
-        <collision name="torso_c">
-          <pose>0 0 1.15 0 0 3.14</pose>
-          <geometry><box><size>0.42 0.28 0.7</size></box></geometry>
-        </collision>
-        <visual name="head_v">
-          <pose>0 0 1.62 0 0 3.14</pose>
-          <geometry><box><size>0.2 0.18 0.24</size></box></geometry>
-          <material>
-            <ambient>0.41 0.33 0.27 1</ambient>
-            <diffuse>0.82 0.66 0.54 1</diffuse>
-          </material>
-        </visual>
-        <collision name="head_c">
-          <pose>0 0 1.62 0 0 3.14</pose>
-          <geometry><box><size>0.2 0.18 0.24</size></box></geometry>
-        </collision>
-      </link>
-    </model>
+    <include>
+      <uri>model://FemaleVisitor</uri>
+      <name>person_1</name>
+      <pose>4.5 5 0 0 0 3.14</pose>
+    </include>
 
-    <model name="person_2">
-      <static>true</static>
-      <pose>-2.6 -6.6 0 0 0 0</pose>
-      <link name="link">
-        <visual name="legs_v">
-          <pose>0 0 0.4 0 0 1.57</pose>
-          <geometry><box><size>0.34 0.24 0.8</size></box></geometry>
-          <material>
-            <ambient>0.09 0.1 0.15 1</ambient>
-            <diffuse>0.18 0.2 0.3 1</diffuse>
-          </material>
-        </visual>
-        <collision name="legs_c">
-          <pose>0 0 0.4 0 0 1.57</pose>
-          <geometry><box><size>0.34 0.24 0.8</size></box></geometry>
-        </collision>
-        <visual name="torso_v">
-          <pose>0 0 1.15 0 0 1.57</pose>
-          <geometry><box><size>0.42 0.28 0.7</size></box></geometry>
-          <material>
-            <ambient>0.475 0.225 0.025 1</ambient>
-            <diffuse>0.95 0.45 0.05 1</diffuse>
-          </material>
-        </visual>
-        <collision name="torso_c">
-          <pose>0 0 1.15 0 0 1.57</pose>
-          <geometry><box><size>0.42 0.28 0.7</size></box></geometry>
-        </collision>
-        <visual name="head_v">
-          <pose>0 0 1.62 0 0 1.57</pose>
-          <geometry><box><size>0.2 0.18 0.24</size></box></geometry>
-          <material>
-            <ambient>0.41 0.33 0.27 1</ambient>
-            <diffuse>0.82 0.66 0.54 1</diffuse>
-          </material>
-        </visual>
-        <collision name="head_c">
-          <pose>0 0 1.62 0 0 1.57</pose>
-          <geometry><box><size>0.2 0.18 0.24</size></box></geometry>
-        </collision>
-      </link>
-    </model>
+    <include>
+      <uri>model://Scrubs</uri>
+      <name>person_2</name>
+      <pose>-2.6 -6.6 0 0 0 1.57</pose>
+    </include>
 
-    <model name="person_3">
-      <static>true</static>
-      <pose>7.8 3.6 0 0 0 0</pose>
-      <link name="link">
-        <visual name="legs_v">
-          <pose>0 0 0.4 0 0 -1.57</pose>
-          <geometry><box><size>0.34 0.24 0.8</size></box></geometry>
-          <material>
-            <ambient>0.09 0.1 0.15 1</ambient>
-            <diffuse>0.18 0.2 0.3 1</diffuse>
-          </material>
-        </visual>
-        <collision name="legs_c">
-          <pose>0 0 0.4 0 0 -1.57</pose>
-          <geometry><box><size>0.34 0.24 0.8</size></box></geometry>
-        </collision>
-        <visual name="torso_v">
-          <pose>0 0 1.15 0 0 -1.57</pose>
-          <geometry><box><size>0.42 0.28 0.7</size></box></geometry>
-          <material>
-            <ambient>0.475 0.225 0.025 1</ambient>
-            <diffuse>0.95 0.45 0.05 1</diffuse>
-          </material>
-        </visual>
-        <collision name="torso_c">
-          <pose>0 0 1.15 0 0 -1.57</pose>
-          <geometry><box><size>0.42 0.28 0.7</size></box></geometry>
-        </collision>
-        <visual name="head_v">
-          <pose>0 0 1.62 0 0 -1.57</pose>
-          <geometry><box><size>0.2 0.18 0.24</size></box></geometry>
-          <material>
-            <ambient>0.41 0.33 0.27 1</ambient>
-            <diffuse>0.82 0.66 0.54 1</diffuse>
-          </material>
-        </visual>
-        <collision name="head_c">
-          <pose>0 0 1.62 0 0 -1.57</pose>
-          <geometry><box><size>0.2 0.18 0.24</size></box></geometry>
-        </collision>
-      </link>
-    </model>
+    <include>
+      <uri>model://Nurse</uri>
+      <name>person_3</name>
+      <pose>7.8 3.6 0 0 0 -1.57</pose>
+    </include>
 
-    <model name="person_4">
-      <static>true</static>
-      <pose>-7.8 -1.4 0 0 0 0</pose>
-      <link name="link">
-        <visual name="legs_v">
-          <pose>0 0 0.4 0 0 1.57</pose>
-          <geometry><box><size>0.34 0.24 0.8</size></box></geometry>
-          <material>
-            <ambient>0.09 0.1 0.15 1</ambient>
-            <diffuse>0.18 0.2 0.3 1</diffuse>
-          </material>
-        </visual>
-        <collision name="legs_c">
-          <pose>0 0 0.4 0 0 1.57</pose>
-          <geometry><box><size>0.34 0.24 0.8</size></box></geometry>
-        </collision>
-        <visual name="torso_v">
-          <pose>0 0 1.15 0 0 1.57</pose>
-          <geometry><box><size>0.42 0.28 0.7</size></box></geometry>
-          <material>
-            <ambient>0.475 0.225 0.025 1</ambient>
-            <diffuse>0.95 0.45 0.05 1</diffuse>
-          </material>
-        </visual>
-        <collision name="torso_c">
-          <pose>0 0 1.15 0 0 1.57</pose>
-          <geometry><box><size>0.42 0.28 0.7</size></box></geometry>
-        </collision>
-        <visual name="head_v">
-          <pose>0 0 1.62 0 0 1.57</pose>
-          <geometry><box><size>0.2 0.18 0.24</size></box></geometry>
-          <material>
-            <ambient>0.41 0.33 0.27 1</ambient>
-            <diffuse>0.82 0.66 0.54 1</diffuse>
-          </material>
-        </visual>
-        <collision name="head_c">
-          <pose>0 0 1.62 0 0 1.57</pose>
-          <geometry><box><size>0.2 0.18 0.24</size></box></geometry>
-        </collision>
-      </link>
-    </model>
+    <include>
+      <uri>model://FemaleVisitor</uri>
+      <name>person_4</name>
+      <pose>-7.8 -1.4 0 0 0 1.57</pose>
+    </include>
 
-    <model name="person_5">
-      <static>true</static>
-      <pose>12.5 -7 0 0 0 0</pose>
-      <link name="link">
-        <visual name="legs_v">
-          <pose>0 0 0.4 0 0 0.8</pose>
-          <geometry><box><size>0.34 0.24 0.8</size></box></geometry>
-          <material>
-            <ambient>0.09 0.1 0.15 1</ambient>
-            <diffuse>0.18 0.2 0.3 1</diffuse>
-          </material>
-        </visual>
-        <collision name="legs_c">
-          <pose>0 0 0.4 0 0 0.8</pose>
-          <geometry><box><size>0.34 0.24 0.8</size></box></geometry>
-        </collision>
-        <visual name="torso_v">
-          <pose>0 0 1.15 0 0 0.8</pose>
-          <geometry><box><size>0.42 0.28 0.7</size></box></geometry>
-          <material>
-            <ambient>0.475 0.225 0.025 1</ambient>
-            <diffuse>0.95 0.45 0.05 1</diffuse>
-          </material>
-        </visual>
-        <collision name="torso_c">
-          <pose>0 0 1.15 0 0 0.8</pose>
-          <geometry><box><size>0.42 0.28 0.7</size></box></geometry>
-        </collision>
-        <visual name="head_v">
-          <pose>0 0 1.62 0 0 0.8</pose>
-          <geometry><box><size>0.2 0.18 0.24</size></box></geometry>
-          <material>
-            <ambient>0.41 0.33 0.27 1</ambient>
-            <diffuse>0.82 0.66 0.54 1</diffuse>
-          </material>
-        </visual>
-        <collision name="head_c">
-          <pose>0 0 1.62 0 0 0.8</pose>
-          <geometry><box><size>0.2 0.18 0.24</size></box></geometry>
-        </collision>
-      </link>
-    </model>
+    <include>
+      <uri>model://Scrubs</uri>
+      <name>person_5</name>
+      <pose>12.5 -7 0 0 0 0.8</pose>
+    </include>
 
   </world>
 </sdf>
