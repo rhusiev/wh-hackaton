@@ -4,8 +4,8 @@ The long version of the README: why Gazebo, what is modelled, topics and the
 search-and-AR loop. To launch the sim, see the [README](../README.md)
 
 Gazebo Harmonic + ArduPilot SITL simulation of a Y3 tricopter with a forward
-RGBD camera, flying inside a generated warehouse. Same shape as the `husky-sim`
-setup in the diploma: one container, one launch file, worlds kept as data.
+RGBD camera, flying inside a generated warehouse. One container, one launch
+file, worlds kept as data.
 
 ---
 
@@ -97,7 +97,8 @@ thrust-to-weight 3.1, hover at 32% of full throttle.
 | --- | --- |
 | `/camera/color/image_raw` | `sensor_msgs/Image`, `rgb8` |
 | `/camera/color/camera_info` | `sensor_msgs/CameraInfo` |
-| `/camera/depth/image_raw` | `sensor_msgs/Image`, `32FC1`, metres |
+| `/camera/depth/image_raw` | `sensor_msgs/Image`, `32FC1`, metres, with stereo noise from `scripts/depth_noise.py` |
+| `/camera/depth/ideal/image_raw` | the same without noise, straight from Gazebo |
 | `/camera/depth/camera_info` | `sensor_msgs/CameraInfo` |
 | `/camera/depth/points` | `sensor_msgs/PointCloud2`, rebuilt by `depth_image_proc` from depth decimated 4x (160x100) |
 | `/ground_truth/odom` | `nav_msgs/Odometry`, exact pose straight from Gazebo |
@@ -199,7 +200,7 @@ lane; one is in a corner. The generator writes their true positions to
 
 ## Performance on a GTX 1050
 
-Physics runs at 1000 Hz and the plugin is in lock-step, so if the GPU cannot
+Physics runs at 500 Hz (2 ms steps) and the plugin is in lock-step, so if the GPU cannot
 keep up the whole sim slows down together and ArduPilot stays in sync — it does
 not fall over, it just runs below real time. If that bothers you, drop the
 camera in `models/tricopter/model.sdf` to 424×240, and/or run

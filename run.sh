@@ -17,7 +17,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 exec_in() {
-    docker compose exec -u ubuntu sim bash -lc "$1"
+    docker compose exec -u ubuntu -e WIPE="${WIPE:-0}" -e CONSOLE="${CONSOLE:-1}" -e MAP="${MAP:-0}" sim bash -lc "$1"
 }
 
 cmd=${1:-shell}

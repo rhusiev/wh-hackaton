@@ -4,7 +4,7 @@
 Start the sim first, then run this against it:
 
     ./run.sh sim gui:=false sitl:=true
-    ./run.sh ./scripts/smoke_test.py
+    ./run.sh smoke
 
 Every check is a fact about the contract the rest of the code depends on, so a
 failure here is a real failure, not a flaky timing test. Exit status is 0 only
