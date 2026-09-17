@@ -1,0 +1,95 @@
+{
+  "world": "garden",
+  "targets": [
+    {
+      "name": "person_0",
+      "label": "person",
+      "kind": "lawn",
+      "xyz": [
+        -5.0,
+        0.0,
+        0.81
+      ],
+      "size": [
+        0.5,
+        0.4,
+        1.62
+      ]
+    },
+    {
+      "name": "person_1",
+      "label": "person",
+      "kind": "lawn",
+      "xyz": [
+        9.0,
+        -1.0,
+        0.81
+      ],
+      "size": [
+        0.5,
+        0.4,
+        1.62
+      ]
+    },
+    {
+      "name": "person_2",
+      "label": "person",
+      "kind": "behind hedge",
+      "xyz": [
+        -2.5,
+        3.2,
+        0.81
+      ],
+      "size": [
+        0.5,
+        0.4,
+        1.62
+      ]
+    },
+    {
+      "name": "person_3",
+      "label": "person",
+      "kind": "behind hedge",
+      "xyz": [
+        -8.3,
+        -2.0,
+        0.81
+      ],
+      "size": [
+        0.5,
+        0.4,
+        1.62
+      ]
+    },
+    {
+      "name": "person_4",
+      "label": "person",
+      "kind": "under tree",
+      "xyz": [
+        -6.3,
+        -8.0,
+        0.81
+      ],
+      "size": [
+        0.5,
+        0.4,
+        1.62
+      ]
+    },
+    {
+      "name": "person_5",
+      "label": "person",
+      "kind": "corner",
+      "xyz": [
+        13.3,
+        -9.2,
+        0.81
+      ],
+      "size": [
+        0.5,
+        0.4,
+        1.62
+      ]
+    }
+  ]
+}

@@ -41,7 +41,7 @@ from nav_msgs.msg import OccupancyGrid
 from rclpy.node import Node
 from tf2_ros import Buffer, TransformListener
 from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import CameraInfo
+from sensor_msgs.msg import CameraInfo, Image
 from std_msgs.msg import String
 from vision_msgs.msg import Detection3DArray
 
@@ -68,21 +68,20 @@ class ArBridge(Node):
             ("min_hits", 6),
             # Nobody's head is higher than this above the floor.
             ("max_top", 2.3),
-            # A candidate closer than this, in frame and not behind a wall, should be detected.
+            # Closer than this, in frame and with nothing measured in front, it should be detected.
             ("miss_range", 8.0),
-            # The same for a confirmed person, who is only lost when missed from up close.
-            ("lost_range", 6.0),
         ])
         self.map_frame, self.body_frame = self._p("map_frame"), self._p("body_frame")
         self.tracker: Tracker = load(self._p("tracker"))(
             merge_radius=self._p("merge_radius"), min_hits=self._p("min_hits"),
             max_top=self._p("max_top"), miss_range=self._p("miss_range"),
-            lost_range=self._p("lost_range"), lost_timeout=self._p("lost_timeout"))
+            lost_timeout=self._p("lost_timeout"))
 
         self.lock = threading.Lock()
         self.grid: dict | None = None
         self.occupancy: Grid | None = None
         self.info: CameraInfo | None = None
+        self.depth: np.ndarray | None = None
         self.last_grid = 0.0
         self.last_tracks = 0.0
 
@@ -95,6 +94,8 @@ class ArBridge(Node):
         self.create_subscription(OccupancyGrid, "/map", self.on_map, 1)
         self.create_subscription(CameraInfo, "/camera/color/camera_info",
                                  lambda msg: setattr(self, "info", msg), qos_profile_sensor_data)
+        self.create_subscription(Image, "/camera/depth/image_raw", self.on_depth,
+                                 qos_profile_sensor_data)
         self.tracks_out = self.create_publisher(String, "/people/tracks", 1)
 
     def _p(self, name: str):
@@ -147,7 +148,12 @@ class ArBridge(Node):
             return None
         k = self.info.k
         return CameraView(rot, trans, (k[0], k[4], k[2], k[5]), (self.info.width, self.info.height),
-                          self.occupancy)
+                          self.occupancy, self.depth)
+
+    def on_depth(self, msg: Image) -> None:
+        """The last depth frame, which says what is really in front of a track."""
+        if msg.encoding == "32FC1":
+            self.depth = np.frombuffer(msg.data, dtype=np.float32).reshape(msg.height, msg.width)
 
     def on_map(self, msg: OccupancyGrid) -> None:
         now = self.now()

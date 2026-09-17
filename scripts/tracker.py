@@ -6,13 +6,13 @@ ar_bridge.py only depends on those two calls, so any class with them works.
 
 NearestTracker keeps a confidence per track as log-odds. A sighting raises it. A
 frame where the track was in plain view, close and unoccluded, but not detected
-lowers it; the whole person, feet to head, has to be in frame. A track goes through three statuses:
+lowers it. The whole person, feet to head, has to be in frame, and the frame's
+own depth image has to measure nothing in front of them. A track goes through
+three statuses:
 
 - candidate: not sure yet. It is confirmed once it has min_hits sightings and
   enough confidence, and deleted once the misses outweigh the sightings
-- confirmed: a person. Misses from up close, within lost_range, make them lost.
-  Farther misses do not count for them: the map may show a clear view that a
-  rack blocks, and a person standing still must not be lost for it
+- confirmed: a person. Misses from within miss_range make them lost
 - lost: a person who is no longer where they were last seen. They keep their last
   position, get confirmed again when seen near it, and are deleted after
   lost_timeout
@@ -119,9 +119,9 @@ class NearestTracker:
     """Sightings join the nearest track of their label within merge_radius, or start one."""
 
     def __init__(self, merge_radius: float, min_hits: int, max_top: float, miss_range: float,
-                 lost_range: float, lost_timeout: float) -> None:
+                 lost_timeout: float) -> None:
         self.merge_radius, self.min_hits, self.max_top = merge_radius, min_hits, max_top
-        self.miss_range, self.lost_range, self.lost_timeout = miss_range, lost_range, lost_timeout
+        self.miss_range, self.lost_timeout = miss_range, lost_timeout
         self._tracks: list[Track] = []
         self.next_id = 0
 
@@ -129,8 +129,7 @@ class NearestTracker:
                visible: Callable[[np.ndarray, float], bool]) -> None:
         seen = self.associate([s for s in sightings if s.xyz[2] + s.height / 2 <= self.max_top], now)
         for track in self._tracks:
-            max_range = self.miss_range if track.status == "candidate" else self.lost_range
-            if track not in seen and all(visible(track.xyz + [0, 0, dz], max_range)
+            if track not in seen and all(visible(track.xyz + [0, 0, dz], self.miss_range)
                                          for dz in (-track.height / 2, track.height / 2)):
                 track.belief = max(track.belief - MISS, REJECT)
         for track in seen:

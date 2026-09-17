@@ -148,13 +148,14 @@ This is the part the idea actually needs, and it is four pieces:
    above 2.3 m is dropped. Each track carries a confidence, kept as log-odds
    (a sum that maps to 0-1 through a sigmoid):
    - A sighting adds 0.5.
-   - A frame that misses the track subtracts 0.35. It only counts when the track
-     is inside the image from feet to head and not hidden behind the map, and
-     within 8 m (`miss_range`) for a candidate or 6 m (`lost_range`) for a
-     confirmed person. From 2.8 m up, feet leave the frame closer than about
-     4.2 m. So a person behind a rack loses nothing. The shorter range is there
-     because the 2D map can show a clear line that a rack really blocks: in test
-     runs a person standing in a gap between racks was marked lost from 7 m.
+   - A frame that misses the track subtracts 0.35. It only counts within 8 m
+     (`miss_range`), with the whole person from feet to head inside the image,
+     and with nothing measured in front of them in that frame's own depth image
+     (`scripts/view.py`). The depth check is what makes this work in any world:
+     the 2D map is a slice at flight height, so it shows a clear line over a
+     shelf or a hedge that really blocks the view, and people standing still
+     behind one were being marked lost. The map is only the fallback, for frames
+     with no depth yet.
    - A track has one of three statuses. A candidate is not sure yet. Past 2.0,
      with at least 6 sightings, it is confirmed and sent as a target. A candidate
      is deleted at -2.0.
@@ -243,8 +244,9 @@ clear line of sight on the map. It flies the stations in a loop and hovers 5 s
 
 1. A person the station should have seen but did not is looked at from 5 m.
    If they are gone, the tracker marks them lost
-2. A lost person is looked for where they were last seen, then with four
-   quarter-turns there
+2. A lost person is looked for where they were last seen, from up to three
+   sides at least 1 rad apart, then with four quarter-turns there. One side may
+   be the one a hedge or a rack hides them from
 3. Whenever the confirmed people change or one moves more than 1 m, the
    stations are planned again. A station it could not reach is left out
 
@@ -257,6 +259,12 @@ a 0.1 m upright cleared its cell. With slow clearing of well-hit cells there wer
 watch (`./run.sh walk`) and all three were followed to their new spots, with 0
 false targets. One person standing still behind a rack was still marked lost
 from a gap the 2D map shows as clear, and not found again by the search.
+
+In the garden, with the same code and no layout given, a run found 4 of the 6
+people with 0 contacts and nobody lost, and followed all three who walked. The
+two it missed are in the east half, which it had not reached when the time ran
+out - `--max-time` and `--watch-time` are the budget, and an open 32 x 22 m
+garden takes longer to cover than the aisles.
 
 To move this to the real aircraft, run with `detector:=none` and start
 `depthai_ros_driver` instead. It publishes the same `Detection3DArray`, so
@@ -308,26 +316,47 @@ Both follow from the same two swaps:
   ./run.sh sitl -- --add-param-file=config/gps_denied.parm
   ```
 
-## The world
+## The worlds
 
-`worlds/warehouse.sdf` is generated, not hand-written — regenerate it with a
-different layout any time:
+Two, both generated rather than hand-written, from the same primitives in
+`scripts/worldgen.py` (a box, a static model, an included person mesh, the SDF
+frame around them, and the truth file):
 
 ```bash
-python3 scripts/gen_warehouse.py --seed 7
+python3 scripts/gen_warehouse.py --seed 7    # worlds/warehouse.sdf
+python3 scripts/gen_garden.py --seed 3       # worlds/garden.sdf
+./run.sh sim world:=garden                   # fly the other one
+WORLD=garden ./run.sh score                  # and score against its people
 ```
 
-32 × 20 × 8 m hall, four rack rows at y = ±2.5 and ±7.5, five clear lanes at
-y = ±9.3, ±5 and 0. The structure is primitives. The people are three
-Gazebo Fuel meshes (Nurse, FemaleVisitor, Scrubs, CC BY 4.0) vendored in
-`models/people/`, so it still works offline. Racks carry randomised cargo boxes and the walls have painted
-bands — both are there so visual odometry has something to track, which a bare
-white warehouse would not give it.
+Nothing in the flight or perception code knows either of them. The world name
+reaches only two places: Gazebo, and the truth file that the detector stand-in
+and the scoring tools read (`--world`, or the `WORLD` variable). The one
+exception is `scripts/sweep.py`, the lawnmower strategy, which is a list of the
+warehouse's lanes by definition - `frontier` and `watch` need no layout at all.
 
-Six standing people are the search targets. Two stand in open aisles;
-three are in the 2.6 m gaps between racks, visible only from the neighbouring
-lane; one is in a corner. The generator writes their true positions to
-`worlds/warehouse_targets.json`, which is what the detector stand-in reads.
+**Warehouse.** 32 × 20 × 8 m hall, four rack rows at y = ±2.5 and ±7.5, five
+clear lanes at y = ±9.3, ±5 and 0. Racks carry randomised cargo boxes and the
+walls have painted bands - both are there so visual odometry has something to
+track, which a bare white warehouse would not give it. Six people: two in open
+aisles, three in the 2.6 m gaps between racks, visible only from the
+neighbouring lane, one in a corner.
+
+**Garden.** A 32 × 22 m plot behind a house, fenced, with a 3.2 m boundary hedge
+that both bounds the map and is tall enough to be an obstacle at flight height.
+Inside: a 12 × 8 × 5 m house with a terrace, five trees whose canopies reach 5 m,
+three free-standing 1.8 m hedges, a shed, a greenhouse, garden furniture, flower
+beds and mown lawn stripes for visual odometry. Six people outside: two on open
+lawn, two behind hedges, one under a tree, one behind the shed.
+
+The 1.8 m hedges are the interesting part. They sit under the 2.3 m scan slice,
+so they never reach the 2D map, and the map claims a clear view straight through
+them. That is the same trap as a warehouse shelf, and it is why the tracker asks
+the depth image, not the map, whether it should have seen someone.
+
+The people are three Gazebo Fuel meshes (Nurse, FemaleVisitor, Scrubs, CC BY
+4.0) vendored in `models/people/`, so it still works offline. Each generator
+writes its people to `worlds/<name>_targets.json`.
 
 ## Performance on a GTX 1050
 

@@ -20,7 +20,8 @@ from pathlib import Path
 
 import websockets
 
-TRUTH = Path(__file__).resolve().parent.parent / "worlds" / "warehouse_targets.json"
+from worldgen import default_world, targets_path
+
 MOVED = Path("/tmp/moved_people.json")  # written by walk_person.py
 
 
@@ -31,12 +32,13 @@ async def snapshot(url: str) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--world", default=default_world())
     parser.add_argument("--url", default="ws://localhost:8790")
     parser.add_argument("--radius", type=float, default=1.0,
                         help="how far a report may be from a person to count as them, m")
     args = parser.parse_args()
 
-    people = json.loads(TRUTH.read_text())["targets"]
+    people = json.loads(targets_path(args.world).read_text())["targets"]
     moved = json.loads(MOVED.read_text()) if MOVED.exists() else {}
     for person in people:
         if person["name"] in moved:

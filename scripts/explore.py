@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Take off and explore the warehouse with a swappable strategy.
+"""Take off and search the world for people, with a swappable strategy.
 
     ./scripts/explore.py                        # lawnmower sweep of the known aisles
     ./scripts/explore.py --strategy frontier    # no prior layout, fly to the unknown in /map

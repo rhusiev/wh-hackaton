@@ -1,4 +1,4 @@
-"""Gazebo + ArduPilot SITL bringup for the warehouse tricopter.
+"""Gazebo + ArduPilot SITL bringup for the tricopter, in world:=warehouse or world:=garden.
 
 ArduPilot SITL itself is normally started separately with scripts/run_sitl.sh so
 that the MAVProxy console keeps a usable stdin; pass sitl:=true for a headless
@@ -229,6 +229,7 @@ def generate_launch_description() -> LaunchDescription:
             ("mapper", LaunchConfiguration("mapper")),
             ("ar", LaunchConfiguration("ar")),
             ("ar_port", LaunchConfiguration("ar_port")),
+            ("world", LaunchConfiguration("world")),
         ],
         condition=IfCondition(LaunchConfiguration("perception")),
     )

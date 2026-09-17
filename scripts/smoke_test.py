@@ -210,8 +210,8 @@ def main() -> int:
     odom = node.last.get("/ground_truth/odom")
     if odom is not None:
         p = odom.pose.pose.position
-        report.check("drone is inside the warehouse",
-                     abs(p.x) < 16 and abs(p.y) < 10 and -1 < p.z < 8,
+        report.check("drone is inside the world's obstacles",
+                     abs(p.x) < 40 and abs(p.y) < 40 and -1 < p.z < 20,
                      f"({p.x:.1f}, {p.y:.1f}, {p.z:.1f})")
 
     print("\nperception")

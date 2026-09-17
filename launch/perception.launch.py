@@ -44,6 +44,8 @@ def generate_launch_description() -> LaunchDescription:
         # The known-pose grid mapper; with slam:=true RTAB-Map publishes /map instead.
         DeclareLaunchArgument("mapper", default_value="true", choices=["true", "false"]),
         DeclareLaunchArgument("ar", default_value="true", choices=["true", "false"]),
+        # Only the truth detector needs it: it reads that world's people.
+        DeclareLaunchArgument("world", default_value="warehouse"),
     ]
 
     # ArduPilot's proximity/avoidance wants a flat scan. The slice is taken in
@@ -73,9 +75,11 @@ def generate_launch_description() -> LaunchDescription:
 
     detector = LaunchConfiguration("detector")
     detectors = [
-        ExecuteProcess(cmd=_script(script), output="screen",
+        ExecuteProcess(cmd=_script(script, *args), output="screen",
                        condition=IfCondition(PythonExpression(["'", detector, f"' == '{name}'"])))
-        for name, script in (("yolo", "person_detector.py"), ("truth", "spatial_detector.py"))
+        for name, script, args in (("yolo", "person_detector.py", ()),
+                                   ("truth", "spatial_detector.py",
+                                    ("--world", LaunchConfiguration("world"))))
     ]
 
     ar_bridge = ExecuteProcess(

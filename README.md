@@ -4,7 +4,8 @@ A wallhack for AR glasses: a scout drone looks behind the walls and racks you
 can't see past, and Spectacles draw the people it found on a minimap.
 
 This repo is its simulation. A tricopter with an OAK-D depth camera explores
-a warehouse, finds people and their heads with a real neural network, and
+a place it is given no layout of - a warehouse or a garden behind a house -
+finds people and their heads with a real neural network, and
 streams where they are to the glasses. The autopilot is real
 ArduPilot firmware (SITL), the world is Gazebo Harmonic, the glue is ROS 2 Jazzy.
 Everything runs inside one Docker container
@@ -38,7 +39,14 @@ Then open two terminals in the project folder:
 The Gazebo window shows the drone take off and sweep all five aisles.
 `./run.sh explore --strategy frontier` instead explores with no prior layout: it flies
 toward whatever part of the map is still unknown. `--strategy watch` does the same,
-then keeps flying between a few spots that together keep every person found in view
+then keeps flying between a few spots that together keep every person found in
+view. The same commands fly the garden instead:
+
+```bash
+./run.sh sim world:=garden
+WORLD=garden ./run.sh explore --strategy watch
+WORLD=garden ./run.sh score
+```
 
 To check that everything works, or to see what the drone and the glasses see:
 
@@ -80,8 +88,8 @@ in the second terminal. In its MAVProxy console type `mode guided`,
 | Path | What |
 | --- | --- |
 | `models/tricopter/` | the drone and its camera |
-| `models/people/`, `models/detector/` | the people in the warehouse and the YOLO11n-pose network |
-| `worlds/` | the warehouse, regenerated with `python3 scripts/gen_warehouse.py` |
+| `models/people/`, `models/detector/` | the people to find and the YOLO11n-pose network |
+| `worlds/` | the two worlds, regenerated with `python3 scripts/gen_warehouse.py` or `gen_garden.py` |
 | `config/tricopter.parm` | ArduPilot parameters. After editing run `WIPE=1 ./run.sh sitl` |
 | `launch/` | what `./run.sh sim` starts |
 | `scripts/` | detector, mapper, AR bridge (WebSocket JSON on port 8790), explore, tests |

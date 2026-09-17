@@ -17,7 +17,8 @@ import math
 import subprocess
 import time
 
-from score_search import MOVED, TRUTH
+from score_search import MOVED
+from worldgen import default_world, targets_path
 
 
 def set_pose(world: str, name: str, x: float, y: float, yaw: float) -> None:
@@ -35,12 +36,13 @@ def main() -> None:
     parser.add_argument("x", type=float)
     parser.add_argument("y", type=float)
     parser.add_argument("--speed", type=float, default=1.0, help="m/s")
-    parser.add_argument("--world", default="warehouse")
+    parser.add_argument("--world", default=default_world())
     args = parser.parse_args()
 
     moved = json.loads(MOVED.read_text()) if MOVED.exists() else {}
     start = moved.get(args.name) or next(
-        t["xyz"][:2] for t in json.loads(TRUTH.read_text())["targets"] if t["name"] == args.name)
+        t["xyz"][:2] for t in json.loads(targets_path(args.world).read_text())["targets"]
+        if t["name"] == args.name)
     distance = math.dist(start, (args.x, args.y))
     heading = math.atan2(args.y - start[1], args.x - start[0])
     # Each service call takes a good part of a second, so progress goes by the clock.

@@ -9,7 +9,7 @@
            to 250 Hz so the 500 Hz gyro clears its 1.8x pre-arm check. -->
       <max_step_size>0.002</max_step_size>
       <real_time_factor>1.0</real_time_factor>
-      <!-- DART's default FCL checker alone holds this static hall to RTF 0.5. -->
+      <!-- DART's default FCL checker alone holds a static world to RTF 0.5. -->
       <dart><collision_detector>bullet</collision_detector></dart>
     </physics>
 

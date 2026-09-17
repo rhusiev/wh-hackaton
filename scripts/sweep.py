@@ -1,4 +1,4 @@
-"""Lawnmower sweep of the warehouse's five known aisles."""
+"""Lawnmower sweep of the warehouse's five known aisles: the one strategy tied to that world."""
 
 from __future__ import annotations
 

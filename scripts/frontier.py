@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 import math
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 # Legs are short so each plan uses the map the last leg revealed.
 LEG = 3.0
-CLEARANCE = 0.8          # arm tip is 0.4 m from the centre, the rest is position error
+CLEARANCE = 1.0          # 0.4 m arm tip, plus the 0.6 m the drone may still be from a waypoint
 MIN_CELLS = 4
 VISITED_RADIUS = 1.5     # a frontier still unknown after looking at it is given up
 
@@ -39,6 +39,7 @@ INSPECT_BELOW = 0.9      # confidence under which a candidate is worth a detour
 INSPECT_RANGE = 5.0      # from 2.8 m up the feet leave the frame closer than about 4.2 m
 INSPECT_HOVER = 3.0      # s of looking, ~12 detector frames
 MAX_INSPECTIONS = 2
+APART = 1.0              # rad between one look at a spot and the next
 
 NEIGHBOURS = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
 
@@ -156,8 +157,13 @@ def plan(grid: Grid, start: tuple[float, float], clearance: float, min_cells: in
 
 
 def plan_view(grid: Grid, start: tuple[float, float], target: tuple[float, float],
-              clearance: float, distance: float) -> Goal | None:
-    """Path to the nearest reachable spot about distance from target with a clear view of it."""
+              clearance: float, distance: float,
+              skip: Sequence[float] = ()) -> Goal | None:
+    """Path to the nearest reachable spot about distance from target with a clear view of it.
+
+    Bearings within APART of one in skip are left out, so looking again means
+    looking from another side.
+    """
     start_cell = grid.cell(*start)
     if not _inside(grid, start_cell):
         return None
@@ -166,6 +172,8 @@ def plan_view(grid: Grid, start: tuple[float, float], target: tuple[float, float
     best = None
     for radius in (distance, distance * 0.7, distance * 1.4):
         for angle in np.linspace(0, math.tau, 24, endpoint=False):
+            if any(abs(math.remainder(angle - other, math.tau)) < APART for other in skip):
+                continue
             spot = (target[0] + radius * math.cos(angle), target[1] + radius * math.sin(angle))
             cell = grid.cell(*spot)
             if not _inside(grid, cell) or steps[cell] < 0:
@@ -231,13 +239,25 @@ def travel(flight: Flight, replan: Callable[[Grid], Goal | None], max_legs: int 
     return False
 
 
-def look_at(flight: Flight, target: tuple[float, float], hover: float) -> bool:
-    """Go where target is in clear view, face it and hover. False if there is no such spot."""
-    if not travel(flight, lambda grid: plan_view(grid, flight.here(), target, CLEARANCE,
-                                                 INSPECT_RANGE)):
-        return False
+def look_at(flight: Flight, target: tuple[float, float], hover: float,
+            skip: Sequence[float] = ()) -> float | None:
+    """Go where target is in clear view, face it and hover.
+
+    Returns the bearing it looked from, to pass as skip for a look from another
+    side, or None when no viewpoint was reachable.
+    """
+    picked: Goal | None = None
+
+    def replan(grid: Grid) -> Goal | None:
+        nonlocal picked
+        picked = plan_view(grid, flight.here(), target, CLEARANCE, INSPECT_RANGE, skip)
+        return picked
+
+    if not travel(flight, replan) or picked is None:
+        return None
     flight.wait(lambda: False, hover)
-    return True
+    return math.remainder(picked.look_yaw + math.pi, math.tau)
+
 
 class FrontierExplorer:
     @staticmethod
@@ -292,5 +312,5 @@ class FrontierExplorer:
             flight.get_logger().info(
                 f"inspecting candidate {candidate.id} at ({candidate.x:.1f}, "
                 f"{candidate.y:.1f}), confidence {candidate.confidence:.2f}")
-            if not look_at(flight, (candidate.x, candidate.y), INSPECT_HOVER):
+            if look_at(flight, (candidate.x, candidate.y), INSPECT_HOVER) is None:
                 flight.get_logger().warn("no clear view of it")

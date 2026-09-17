@@ -3,7 +3,7 @@
 
     ./run.sh clearance            # during a flight, Ctrl-C prints the summary
 
-Obstacles are the box collisions of the static models in worlds/warehouse.sdf,
+Obstacles are the box collisions of the static models in the world's SDF,
 plus a box around each person where the world puts them. The drone is a
 cylinder around its props. The gap is measured between the two, so below 0 is
 contact. Nothing here feeds back into the flight; it is a separate process
@@ -18,15 +18,14 @@ import math
 import signal
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from pathlib import Path
 
 import numpy as np
 import rclpy
+from worldgen import WORLDS, default_world, targets_path
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 
-WORLDS = Path(__file__).resolve().parent.parent / "worlds"
 DRONE_RADIUS = 0.40        # 0.27 m arm plus a 0.127 m prop
 DRONE_HALF_HEIGHT = 0.15   # landing legs to prop tips
 NEAR = 0.3                 # a pass closer than this is logged, once, at its closest
@@ -80,7 +79,7 @@ def load_world(world: str) -> Boxes:
                             tuple(float(v) for v in box.text.split())))
     yaws = {include.findtext("name"): _pose(include.find("pose"))[3]
             for include in root.iter("include")}
-    for person in json.loads((WORLDS / f"{world}_targets.json").read_text())["targets"]:
+    for person in json.loads(targets_path(world).read_text())["targets"]:
         entries.append((person["name"], (*person["xyz"], yaws.get(person["name"], 0.0)),
                         tuple(person["size"])))
     return Boxes(entries)
@@ -135,7 +134,7 @@ class Clearance(Node):
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--world", default="warehouse")
+    parser.add_argument("--world", default=default_world())
     args, ros_args = parser.parse_known_args()
 
     rclpy.init(args=ros_args)

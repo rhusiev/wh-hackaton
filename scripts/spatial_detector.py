@@ -36,6 +36,7 @@ from vision_msgs.msg import (
 from visualization_msgs.msg import Marker, MarkerArray
 
 from geometry import quat_to_matrix
+from worldgen import default_world, targets_path
 from stereo import DEPTH_MAX, DEPTH_MIN, DEPTH_RELIABLE, sigma
 
 
@@ -187,12 +188,13 @@ class SpatialDetector(Node):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--targets", type=Path, default=Path(__file__).resolve()
-                        .parent.parent / "worlds" / "warehouse_targets.json")
+    parser.add_argument("--world", default=default_world())
+    parser.add_argument("--targets", type=Path)
     known, ros_args = parser.parse_known_args()
 
     rclpy.init(args=ros_args)
-    node = SpatialDetector(json.loads(known.targets.read_text())["targets"])
+    targets = known.targets or targets_path(known.world)
+    node = SpatialDetector(json.loads(targets.read_text())["targets"])
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

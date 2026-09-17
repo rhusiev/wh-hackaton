@@ -1,6 +1,6 @@
 """Explore, then keep every person found in view from a few stations.
 
-After FrontierExplorer has mapped the warehouse, the confirmed people are split
+After FrontierExplorer has mapped the place, the confirmed people are split
 between as few stations as possible. A station is a reachable spot and a heading
 from which some people are within WATCH_RANGE, inside the camera's field of view
 and in clear line of sight on the map. The drone flies the stations in a loop and
@@ -9,7 +9,8 @@ hovers at each, so the tracker keeps seeing everyone:
 - a person walking in view is followed by the tracker
 - a person a station should see but did not is looked at from up close, which is
   what makes the tracker mark them lost if they are gone
-- a lost person is looked for once where they were last seen, then all around it
+- a lost person is looked for where they were last seen, from up to three sides,
+  then by turning around there
 - a new candidate is inspected as during exploration
 - whenever the people or their positions change, the stations are planned again
 - a station it could not reach is left out of the next plans
@@ -38,6 +39,7 @@ MIN_RANGE = 1.5
 HALF_FOV = 0.5           # rad, the camera's 0.6 with a margin for heading error
 SPOT_STEP = 1.0          # m between the spots considered
 MOVED = 1.0              # m a person may shift before the stations are planned again
+LOOKS = 3                # sides a lost person is looked for from
 
 
 @dataclass
@@ -132,7 +134,7 @@ class Watch:
                     self.search(flight, person)
                 if self.changed(watched, self.confirmed(flight)):
                     break
-        log.info("holding")
+        log.info("watch done, holding")
 
     @staticmethod
     def confirmed(flight: Flight) -> list[Person]:
@@ -152,7 +154,7 @@ class Watch:
         return reached
 
     def search(self, flight: Flight, person: Person) -> None:
-        """Look where a lost person was, then turn around there, until they are found again."""
+        """Look where a lost person was from several sides, then turn around there."""
         self.searched.add(person.id)
         log = flight.get_logger()
         log.info(f"person {person.id} lost at ({person.x:.1f}, {person.y:.1f}) {person.age:.0f} s ago")
@@ -161,9 +163,16 @@ class Watch:
             return any(p.id == person.id and p.status == "confirmed" and p.age < self.dwell
                        for p in flight.people())
 
-        if frontier.look_at(flight, (person.x, person.y), self.dwell) and found():
-            log.info(f"person {person.id} found again")
-            return
+        # One side may be the one a hedge or a rack hides them from, so try others.
+        tried: list[float] = []
+        for _ in range(LOOKS):
+            bearing = frontier.look_at(flight, (person.x, person.y), self.dwell, tried)
+            if bearing is None:
+                break
+            tried.append(bearing)
+            if found():
+                log.info(f"person {person.id} found again from {len(tried)} side(s)")
+                return
         for _ in range(4):
             flight.turn(math.remainder(flight.heading() + math.pi / 2, math.tau))
             if flight.wait(found, self.dwell / 2):

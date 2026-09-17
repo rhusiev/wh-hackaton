@@ -7,7 +7,8 @@
 #   ./run.sh up             start the container in the background
 #   ./run.sh sim [args]     Gazebo + bridges + MAVROS
 #   ./run.sh sitl [args]    ArduPilot SITL with the MAVProxy console
-#   ./run.sh explore [args] arm, take off and sweep the aisles
+#   ./run.sh explore [args] arm, take off and search the world
+#   ./run.sh world [args]   regenerate a world: warehouse or garden
 #   ./run.sh score [args]   compare the people found with where they really are
 #   ./run.sh smoke          check a running sim against the topic contract
 #   ./run.sh clearance      closest the drone gets to anything, from ground truth
@@ -16,12 +17,16 @@
 #   ./run.sh preview [args] what the AR glasses would draw, from the AR feed
 #   ./run.sh shell          interactive shell
 #   ./run.sh down           stop and remove the container
+#
+# WORLD=garden picks the world the tools read the truth of; ./run.sh sim takes
+# world:=garden to fly it.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 exec_in() {
-    docker compose exec -u ubuntu -e WIPE="${WIPE:-0}" -e CONSOLE="${CONSOLE:-1}" -e MAP="${MAP:-0}" sim bash -lc "$1"
+    docker compose exec -u ubuntu -e WIPE="${WIPE:-0}" -e CONSOLE="${CONSOLE:-1}" -e MAP="${MAP:-0}" \
+        -e WORLD="${WORLD:-warehouse}" sim bash -lc "$1"
 }
 
 cmd=${1:-shell}
@@ -41,6 +46,7 @@ case "${cmd}" in
     smoke) exec_in "./scripts/smoke_test.py $*" ;;
     clearance) exec_in "./scripts/clearance.py $*" ;;
     walk)  exec_in "./scripts/walk_person.py $*" ;;
+    world) exec_in "./scripts/gen_${1:-warehouse}.py ${*:2}" ;;
     demo)  exec_in "./scripts/camera_demo.py $*" ;;
     preview) exec_in "./scripts/ar_preview.py $*" ;;
     shell) docker compose exec -u ubuntu sim bash -l ;;

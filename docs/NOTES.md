@@ -484,3 +484,12 @@ times slower fixed it. Making them never clear did not: people do show up in the
 slice now and then, and a person who walked away left a permanent obstacle that
 blocked the view of their old spot
 
+## A 2D map cannot say whether the camera could see a person
+
+The occupancy grid is one slice at flight height. A warehouse shelf below the
+slice, or a 1.8 m garden hedge, never reaches it, so the map reports a clear
+line where the view is solid. People standing still behind one were marked lost
+for it. The frame's own depth image answers the question directly: sample the
+pixels where the person should be and compare with their distance. Nothing to
+accumulate, nothing to age, and it fails exactly where the detector fails
+
