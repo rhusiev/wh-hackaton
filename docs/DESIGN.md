@@ -134,8 +134,9 @@ This is the part the idea actually needs, and it is four pieces:
    `detector:=truth`, `scripts/spatial_detector.py` reads
    `worlds/warehouse_targets.json` instead and keeps what the camera could see.
 3. **Targets → tracks.** `scripts/ar_bridge.py` transforms detections into the
-   map frame and fuses them into persistent tracks. A track is only sent after
-   2 sightings, and a "person" whose top is above 2.3 m is dropped. This is the point of the
+   map frame and fuses each into the nearest track of its label within 1 m, or
+   starts a new one. A track is only sent after
+   6 sightings, and a "person" whose top is above 2.3 m is dropped. This is the point of the
    whole thing: a person seen once down an aisle stays on the minimap after the
    drone has flown past, which is what "бачити людину за стінкою" means.
 4. **Tracks → Spectacles.** The same node serves a WebSocket on port 8790 at
@@ -171,8 +172,9 @@ flies there in legs of at most 3 m, facing the direction of travel. The scan onl
 covers what the camera faces. At each frontier it turns toward the unknown
 space. A frontier it has visited or failed to reach is skipped within 1.5 m. It
 stops when no frontier is left or after `--max-time` (600 s). In one test run
-it flew 42 legs, stopped after ~3.5 min and found 5 of the 6 people, each within
-0.15 m and with a head. It also reported 3 false targets, including one duplicate track.
+it flew 34 legs and found all 6 people, each within 0.25 m and with a head. Each
+real person had 18 or more sightings. The 8 false tracks had 2-5, and were a
+person's noisy depth splitting off ~1 m away, so the 6-sighting filter removes them
 
 To move this to the real aircraft, delete `person_detector.py` and run
 `depthai_ros_driver` instead. It publishes the same `Detection3DArray`, so

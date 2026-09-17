@@ -13,7 +13,7 @@ Payload, all lengths in metres in the map frame:
      "targets": [{"id": 0, "label": "person", "x": -9.0, "y": 0.0, "z": 0.81, "h": 1.62,
                   "head": {"x": -9.0, "y": 0.02, "z": 1.5, "size": 0.22},
                   "score": 0.78, "age": 1.3, "hits": 12}],
-     "map": {"res": 0.4, "w": 80, "h": 50, "x0": -16.0, "y0": -10.0,
+     "map": {"res": 0.2, "w": 200, "h": 200, "x0": -20.0, "y0": -20.0,
              "cells": "<base64 of w*h bytes, 0 free / 1 occupied / 2 unknown>"}}
 
 A target is a box standing on the floor: centre x, y, z and height h. "head" is
@@ -71,10 +71,10 @@ class ArBridge(Node):
         self.declare_parameters("", [
             ("map_frame", "map"),
             ("body_frame", "base_link"),
-            ("merge_radius", 1.5),
+            ("merge_radius", 1.0),
             ("track_timeout", 0.0),
-            # A single sighting is not shown; most false detections never repeat.
-            ("min_hits", 2),
+            # About 1.5 s in view at 4 Hz; stray depth splits of a real person rarely reach it.
+            ("min_hits", 6),
             # Nobody's head is higher than this above the floor.
             ("max_top", 2.3),
         ])
@@ -139,11 +139,13 @@ class ArBridge(Node):
                     people[det_id].update_head(head)
 
     def absorb(self, xyz: np.ndarray, height: float, hypothesis, now: float) -> Track:
-        for track in self.tracks:
-            if (track.label == hypothesis.class_id
-                    and np.linalg.norm(track.xyz[:2] - xyz[:2]) < self.merge_radius):
-                track.update(xyz, height, hypothesis.score, now)
-                return track
+        # The nearest track, not the first in range: two people 1.5 m apart must not share one.
+        near = [(np.linalg.norm(t.xyz[:2] - xyz[:2]), t) for t in self.tracks
+                if t.label == hypothesis.class_id]
+        distance, track = min(near, key=lambda pair: pair[0], default=(math.inf, None))
+        if distance < self.merge_radius:
+            track.update(xyz, height, hypothesis.score, now)
+            return track
         track = Track(self.next_id, hypothesis.class_id, xyz, height, hypothesis.score, now)
         self.tracks.append(track)
         self.next_id += 1
