@@ -53,11 +53,6 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument("verbose", default_value="1"),
         # 1 = full 640x400 into the cloud and scan, 2 = 320x200, 4 = 160x100.
         DeclareLaunchArgument("depth_decimation", default_value="4"),
-        DeclareLaunchArgument("name", default_value="tricopter"),
-        DeclareLaunchArgument("x", default_value="-13.5"),
-        DeclareLaunchArgument("y", default_value="0.0"),
-        DeclareLaunchArgument("z", default_value="0.2"),
-        DeclareLaunchArgument("yaw", default_value="0.0"),
         DeclareLaunchArgument("sitl", default_value="false", choices=["true", "false"]),
         DeclareLaunchArgument("gps_denied", default_value="false", choices=["true", "false"]),
         DeclareLaunchArgument("mavros", default_value="true", choices=["true", "false"]),
@@ -90,21 +85,6 @@ def generate_launch_description() -> LaunchDescription:
                 ],
             ),
             ("on_exit_shutdown", "true"),
-        ],
-    )
-
-    spawn = Node(
-        package="ros_gz_sim",
-        executable="create",
-        output="screen",
-        arguments=[
-            "-world", world,
-            "-file", str(ROOT / "models" / "tricopter" / "model.sdf"),
-            "-name", LaunchConfiguration("name"),
-            "-x", LaunchConfiguration("x"),
-            "-y", LaunchConfiguration("y"),
-            "-z", LaunchConfiguration("z"),
-            "-Y", LaunchConfiguration("yaw"),
         ],
     )
 
@@ -264,7 +244,6 @@ def generate_launch_description() -> LaunchDescription:
     ld.add_action(depth_to_cloud)
     for node in static_tf:
         ld.add_action(node)
-    ld.add_action(TimerAction(period=4.0, actions=[spawn]))
     ld.add_action(TimerAction(period=9.0, actions=[sitl]))
     ld.add_action(TimerAction(period=11.0, actions=[mavros]))
     ld.add_action(TimerAction(period=12.0, actions=[perception]))

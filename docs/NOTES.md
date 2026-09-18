@@ -661,3 +661,21 @@ then it fails all at once. That shape matters for what to build next: the
 failure is not noise to be filtered, it is a discrete jump of the whole frame,
 and a per-track constant-velocity filter would read it as every person in the
 building accelerating at once.
+
+## The drone flew for weeks without being in the picture
+
+`ros_gz_sim create` puts a model into the running server, and physics, sensors
+and the ArduPilot plugin all pick it up at once - `/model/tricopter/pose` and the
+IMU topic appear, MAVROS arms, the camera publishes. The GUI is the one consumer
+that does not. It builds its scene once from a snapshot of
+`/world/<name>/scene/info` taken at startup, and afterwards learns about new
+models only from the periodic `/world/<name>/state` message, which it drops when
+it is loaded. So the drone was in the simulation and absent from the Entity Tree,
+which reads as a spawn failure and is not one.
+
+The launch fired the spawn on a 4 s timer, which is a guess about how long a
+world of textured walls, racks and three animated meshes takes to build. The
+guess loses on a slower machine, and nothing reports that it lost.
+
+The aircraft is now part of the generated world, in `worldgen.py`, so it is in
+the first snapshot and the race cannot happen.

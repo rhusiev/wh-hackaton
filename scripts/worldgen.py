@@ -1,7 +1,8 @@
 """Shared pieces for the world generators: box primitives and the SDF frame around them.
 
 A world is a list of static models made of boxes, plus people included from
-models/people, plus the truth file the detector stand-in and the scorer read.
+models/people, plus the drone itself, plus the truth file the detector stand-in
+and the scorer read.
 Nothing in the flight code knows any of it; see gen_warehouse.py and
 gen_garden.py for the two worlds built on this.
 """
@@ -19,6 +20,8 @@ ORIGIN_LATLON = (49.839700, 24.029700, 296.0)
 PEOPLE = ("Nurse", "FemaleVisitor", "Scrubs")
 PERSON_SIZE = (0.5, 0.4, 1.62)
 TEXTURE_URI = "model://surfaces/materials/textures"
+DRONE = "tricopter"
+DRONE_START = (-13.5, 0.0, 0.2, 0.0)    # x, y, z, yaw; config/gz_bridge.yaml uses the name too
 
 
 def material(colour: tuple[float, float, float], texture: str | None, indent: str) -> list[str]:
@@ -85,12 +88,24 @@ def static_model(name: str, pose: tuple[float, float, float], boxes: list[Box]) 
     </model>"""
 
 
-def person(name: str, mesh: str, x: float, y: float, yaw: float) -> str:
+def include(uri: str, name: str, x: float, y: float, z: float, yaw: float) -> str:
+    """A model from models/, placed. Resolved through GZ_SIM_RESOURCE_PATH."""
     return f"""    <include>
-      <uri>model://{mesh}</uri>
+      <uri>model://{uri}</uri>
       <name>{name}</name>
-      <pose>{x:.4g} {y:.4g} 0 0 0 {yaw:.4g}</pose>
+      <pose>{x:.4g} {y:.4g} {z:.4g} 0 0 {yaw:.4g}</pose>
     </include>"""
+
+
+def drone() -> str:
+    """The aircraft, part of the world rather than spawned into it once it is running.
+
+    Spawning it afterwards with ros_gz_sim create works for physics and sensors but
+    races the GUI: the GUI builds its scene from one snapshot taken at startup, and
+    a model created after that snapshot only reaches it through the periodic state
+    message, which a loaded GUI drops. The drone then flies invisibly.
+    """
+    return include(DRONE, DRONE, *DRONE_START)
 
 
 def targets(spots) -> tuple[list[str], list[dict]]:
@@ -98,7 +113,7 @@ def targets(spots) -> tuple[list[str], list[dict]]:
     models, truth = [], []
     for i, (x, y, yaw, kind) in enumerate(spots):
         name = f"person_{i}"
-        models.append(person(name, PEOPLE[i % len(PEOPLE)], x, y, yaw))
+        models.append(include(PEOPLE[i % len(PEOPLE)], name, x, y, 0.0, yaw))
         truth.append({"name": name, "label": "person", "kind": kind,
                       "xyz": [x, y, PERSON_SIZE[2] / 2], "size": list(PERSON_SIZE)})
     return models, truth
@@ -164,6 +179,8 @@ def world(name: str, generator: str, seed: int, scene: str, lights: str, models:
 {lights}
 
 {models}
+
+{drone()}
 
   </world>
 </sdf>

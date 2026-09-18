@@ -4595,5 +4595,11 @@
       <pose>12.5 -7 0 0 0 0.8</pose>
     </include>
 
+    <include>
+      <uri>model://tricopter</uri>
+      <name>tricopter</name>
+      <pose>-13.5 0 0.2 0 0 0</pose>
+    </include>
+
   </world>
 </sdf>
