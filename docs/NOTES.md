@@ -554,3 +554,19 @@ ever - it now gives up after GIVE_UP legs on the same one, the rule travel()
 already used. And "still exploring" was tested as "did the known-cell count go
 up at all", which map noise guarantees for ever; it now takes GROWTH cells of
 real growth within STALE seconds
+
+
+## A weak detection is worth more than no detection
+
+The detector threw away every box under 0.4, so a person at range whose box
+faded produced nothing at all, and their track decayed into "lost" for want of
+evidence. Keeping boxes down to 0.25 and letting them extend an existing track,
+while still requiring 0.6 to start one, is the ByteTrack idea and it is worth
+more here than anything in the search logic: people found while exploring went
+from 22 of 30 to 23 of 24 across whole runs, and the garden's far-east person at
+(9.0, -1.0), whom no earlier run had ever found, came in with 200 hits.
+
+Measuring the detector first mattered. An earlier gate at 0.5 was set from the
+range curve in spatial_detector.py, which is the ground-truth stand-in and was
+not the detector running - the real YOLO scores are 0.85 median and 0.61 at the
+5th percentile, so that gate would have blocked nothing at all

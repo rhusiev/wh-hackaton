@@ -72,7 +72,10 @@ class PersonDetector(Node):
         self.declare_parameters("", [
             ("rate", 5.0),
             ("threads", 2),
-            ("min_score", 0.4),
+            # Weak boxes are kept on purpose: they may extend a track the tracker already
+            # has, which is what keeps a person at range alive. Only a confident one starts
+            # a track (tracker.START_SCORE), so the weak tail cannot invent people.
+            ("min_score", 0.25),
             ("min_keypoint", 0.5),
             ("network", "person_network:PoseNetwork"),
             ("model", str(MODEL)),

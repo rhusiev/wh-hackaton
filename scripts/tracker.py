@@ -5,10 +5,12 @@ camera could see in that frame. tracks() reports every track with its status, an
 ar_bridge.py only depends on those two calls, so any class with them works.
 
 NearestTracker keeps a confidence per track as log-odds. A sighting raises it. A
-frame where the track was in plain view, close and unoccluded, but not detected
-lowers it - but only once the track has gone GRACE seconds unseen, because a
-detector that finds a distant person every other frame is not evidence that
-nobody is there. The whole person, feet to head, has to be in frame, and the
+weak sighting may extend a track it lands on but never starts one, so a far-off
+detection the detector is unsure of keeps a known person alive without inventing
+a new one. A frame where the track was in plain view, close and unoccluded, but
+not detected lowers it - but only once the track has gone GRACE seconds unseen,
+because a detector that finds a distant person every other frame is not evidence
+that nobody is there. The whole person, feet to head, has to be in frame, and the
 frame's own depth image has to measure nothing in front of them. A track goes
 through three statuses:
 
@@ -40,6 +42,7 @@ UNCONFIRM = 0.0          # a confirmed track is lost below this
 REJECT = -2.0            # and a candidate deleted
 LOG_ODDS_MAX = 6.0
 GRACE = 2.0              # s unseen before misses count, about 8 detector frames
+START_SCORE = 0.6        # a sighting weaker than this may extend a track but not start one
 WALK_SPEED = 1.0         # m/s, how far an unseen person may have gone
 MAX_WALK = 5.0           # m, beyond which a new person is someone else
 MOVED = 0.5              # m, a sighting this far off is a step, not stereo noise
@@ -182,7 +185,7 @@ class NearestTracker:
         for i, sighting in enumerate(sightings):
             if i in taken:
                 taken[i].update(sighting, now)
-            else:
+            elif sighting.score >= START_SCORE:
                 track = Track(self.next_id, sighting, now)
                 self._tracks.append(track)
                 self.next_id += 1

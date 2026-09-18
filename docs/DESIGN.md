@@ -147,7 +147,13 @@ This is the part the idea actually needs, and it is four pieces:
    drift within 1 m of each other are merged. A "person" whose top is
    above 2.3 m is dropped. Each track carries a confidence, kept as log-odds
    (a sum that maps to 0-1 through a sigmoid):
-   - A sighting adds 0.5.
+   - A sighting adds 0.5. Weak ones count: the detector keeps boxes down to 0.25
+     (`min_score`) rather than 0.4, because the box for a person at range is the
+     first thing to fade and dropping it is what let them decay into "lost". Only
+     a sighting of at least 0.6 (`START_SCORE`) may start a track, so the weak
+     tail extends people we already have without inventing new ones. Measured on
+     this detector, real people score 0.85 at the median and 0.61 at the 5th
+     percentile.
    - A frame that misses the track subtracts 0.35. It only counts within 8 m
      (`miss_range`), with the whole person from feet to head inside the image,
      and with nothing measured in front of them in that frame's own depth image
