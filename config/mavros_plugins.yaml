@@ -8,3 +8,6 @@
       - local_position
       - setpoint_position
       - obstacle_distance
+      - vision_pose
+      - global_position
+      - home_position

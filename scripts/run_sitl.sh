@@ -4,6 +4,8 @@
 #   WIPE=1     reset the simulated EEPROM before loading tricopter.parm
 #   CONSOLE=0  no MAVProxy console
 #   MAP=1      MAVProxy map window
+#   GPS_DENIED=1  load config/gps_denied.parm on top, so the EKF takes its position
+#                 from /mavros/vision_pose/pose instead of the simulated GNSS
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -17,6 +19,7 @@ extra=()
 [[ "${WIPE:-0}" == "1" ]] && extra+=(-w)
 [[ "${CONSOLE:-1}" == "1" ]] && extra+=(--console)
 [[ "${MAP:-0}" == "1" ]] && extra+=(--map)
+case "${GPS_DENIED:-0}" in 1|true) extra+=(--add-param-file="${ROOT_DIR}/config/gps_denied.parm") ;; esac
 
 # gazebo-iris only supplies the JSON backend defaults; tricopter.parm is applied
 # after it and is what actually defines the airframe, then sitl.parm on top.

@@ -89,6 +89,8 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     scan_relay = ExecuteProcess(cmd=_script("scan_relay.py"), output="screen")
+    vision_relay = ExecuteProcess(cmd=_script("vision_relay.py"), output="screen",
+                                  condition=IfCondition(slam))
 
     grid_mapper = ExecuteProcess(
         cmd=_script("grid_mapper.py"), output="screen",
@@ -147,4 +149,5 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     return LaunchDescription(
-        args + [to_scan, scan_relay, grid_mapper, *detectors, ar_bridge, visual_odometry, rtabmap])
+        args + [to_scan, scan_relay, grid_mapper, *detectors, ar_bridge, visual_odometry, rtabmap,
+                vision_relay])

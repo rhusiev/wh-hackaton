@@ -1,13 +1,19 @@
 # Indoor / GPS-denied search & rescue: the EKF takes position from the OAK-D
 # visual odometry instead of GNSS. Load on top of tricopter.parm:
 #
-#   ./run.sh sitl -- --add-param-file=config/gps_denied.parm
+#   ./run.sh sim slam:=true gps_denied:=true
 #
 # Nothing will arm until /mavros/vision_pose/pose is actually being published at
-# >=10 Hz - launch rtabmap first (./run.sh sim slam:=true).
+# >=10 Hz; scripts/vision_relay.py does that from RTAB-Map's odometry, and sets
+# the EKF origin and home, which without GNSS nothing else would.
+#
+# The SITL EEPROM is persistent, and a defaults file cannot override a value
+# already stored in it, so switch in or out of this file with WIPE=1.
 
 GPS1_TYPE        0        # no GNSS at all, so the EKF cannot silently fall back
-SIM_GPS1_ENABLE  0
+# This build has no SIM_GPS1_ENABLE. An unknown name here is not just ignored -
+# it swallows the line after it too, so a typo turns off the next setting.
+SIM_GPS_DISABLE  1
 
 EK3_SRC1_POSXY   6        # ExternalNav
 EK3_SRC1_VELXY   6
@@ -15,7 +21,9 @@ EK3_SRC1_POSZ    1        # baro: stereo height drifts over a flat warehouse flo
 EK3_SRC1_VELZ    6
 EK3_SRC1_YAW     6        # ExternalNav yaw; the M10Q compass is useless near racks
 
-VISO_TYPE        0        # position comes in over MAVLink VISION_POSITION_ESTIMATE
+VISO_TYPE        1        # MAVLink: position arrives as VISION_POSITION_ESTIMATE.
+                          # 0 is not "no extra hardware" - it disables the backend
+                          # ExternalNav reads from, and nothing will arm
 EK3_ENABLE       1
 AHRS_EKF_TYPE    3
 

@@ -570,3 +570,61 @@ Measuring the detector first mattered. An earlier gate at 0.5 was set from the
 range curve in spatial_detector.py, which is the ground-truth stand-in and was
 not the detector running - the real YOLO scores are 0.85 median and 0.61 at the
 5th percentile, so that gate would have blocked nothing at all
+
+
+## Watching from farther away does not kill ghosts, it just sees less
+
+A miss needs the whole body in frame, and from 2.8 m up the feet leave the frame
+closer than about 4.2 m, so a station inside that ought never to be able to
+charge one - a ghost watched from close up looked unkillable. Raising the watch
+station floor from 1.5 m to 4.5 m tested that and made things worse: 5/6 and 3/6
+found against 6/6 and 5/6, with the ghosts still there (121 and 862 hits). The
+stations lose detections faster than they gain the ability to time out a track.
+
+Looking at where the surviving false targets actually are says the premise was
+wrong anyway. Garden target 28 at (-9.2, -1.5) with 862 hits sits 1.0 m from
+person_3, who never moved, and warehouse target 20 at (-7.0, -2.5) sits 1.4 m
+from person_4. They are not ghosts of people who walked away - they are
+duplicate tracks of people we already have, born just outside the 1 m
+merge_radius. Admitting weak boxes made more of them, because a weak box has the
+worst stereo depth. The fix to try is a birth exclusion: a sighting too far to
+join a track of the same label, but still close to one, should be ignored rather
+than allowed to start a rival track
+
+## The GPS-denied path needed four separate things before it would arm
+
+`config/gps_denied.parm` existed but had never been run, and every step of
+getting it airborne turned up something not in our code:
+
+- a defaults file cannot override a value already in the SITL EEPROM, which
+  persists in `.sitl/eeprom.bin` between runs. `EK3_SRC1_POSXY` stayed at 3
+  (GPS) through several boots with 6 in the file. Wipe the EEPROM when switching
+  in or out of the file
+- an unknown parameter name in a defaults file swallows the line after it as
+  well. `SIM_GPS1_ENABLE` does not exist in this build - it is `SIM_GPS_DISABLE`
+  - and its presence is what silently dropped `EK3_SRC1_POSXY`
+- `VISO_TYPE 0` is not "no extra hardware". It disables the visual odometry
+  backend that ExternalNav reads from, so the prearm says `VisOdom: not healthy`
+  no matter how fast the vision pose arrives. MAVLink is 1
+- mavros's plugin is called `vision_pose`, not `vision_pose_estimate`. A name
+  the allowlist does not recognise is not an error, the plugin just never loads
+  and the topic has no subscriber. `ros2 topic info` showing a subscription
+  count of 0 is the tell
+
+Nothing set the EKF origin or home either, since without GNSS nothing can.
+`scripts/vision_relay.py` does both, and home has to be asked for repeatedly:
+it is refused until the EKF has an origin and a position it trusts, which is a
+moment after the origin lands.
+
+## Visual odometry alone does not hold the warehouse
+
+Once it armed it took off, flew one leg to (-13.7, -4.3), and then hit `EKF
+variance`, failsafed into LAND and disarmed, about 3 minutes in. The EKF held
+its estimate at the origin while the airframe actually slid 4.6 m in y, so the
+error is not a slow drift - the estimate stopped tracking altogether. Blank
+warehouse walls give rgbd_odometry almost nothing to hold on to.
+
+The frame question resolved itself: with ExternalNav the EKF's local frame
+starts at the drone, not at the world origin, and explore.py already measures
+the difference ("map -> local offset 13.46 0.04"). What breaks is the flying,
+not the bookkeeping.

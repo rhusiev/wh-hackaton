@@ -59,6 +59,7 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument("z", default_value="0.2"),
         DeclareLaunchArgument("yaw", default_value="0.0"),
         DeclareLaunchArgument("sitl", default_value="false", choices=["true", "false"]),
+        DeclareLaunchArgument("gps_denied", default_value="false", choices=["true", "false"]),
         DeclareLaunchArgument("mavros", default_value="true", choices=["true", "false"]),
         DeclareLaunchArgument("fcu_url", default_value="udp://:14551@"),
         DeclareLaunchArgument("perception", default_value="true", choices=["true", "false"]),
@@ -200,7 +201,8 @@ def generate_launch_description() -> LaunchDescription:
 
     sitl = ExecuteProcess(
         cmd=[str(ROOT / "scripts" / "run_sitl.sh")],
-        additional_env={"MAP": "0", "CONSOLE": "0"},
+        additional_env={"MAP": "0", "CONSOLE": "0",
+                        "GPS_DENIED": LaunchConfiguration("gps_denied")},
         output="screen",
         condition=IfCondition(LaunchConfiguration("sitl")),
     )
