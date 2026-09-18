@@ -43,6 +43,7 @@ REJECT = -2.0            # and a candidate deleted
 LOG_ODDS_MAX = 6.0
 GRACE = 2.0              # s unseen before misses count, about 8 detector frames
 START_SCORE = 0.6        # a sighting weaker than this may extend a track but not start one
+BIRTH_CLEAR = 2.0        # m, no new track this near an existing one of the same label
 WALK_SPEED = 1.0         # m/s, how far an unseen person may have gone
 MAX_WALK = 5.0           # m, beyond which a new person is someone else
 MOVED = 0.5              # m, a sighting this far off is a step, not stereo noise
@@ -177,7 +178,9 @@ class NearestTracker:
             if t.label == s.label)
         taken: dict[int, Track] = {}
         seen: set[Track] = set()
+        nearest: dict[int, float] = {}
         for distance, i, j in pairs:
+            nearest.setdefault(i, distance)
             track = self._tracks[j]
             if distance < self.merge_radius and i not in taken and track not in seen:
                 taken[i] = track
@@ -185,7 +188,7 @@ class NearestTracker:
         for i, sighting in enumerate(sightings):
             if i in taken:
                 taken[i].update(sighting, now)
-            elif sighting.score >= START_SCORE:
+            elif sighting.score >= START_SCORE and nearest.get(i, math.inf) > BIRTH_CLEAR:
                 track = Track(self.next_id, sighting, now)
                 self._tracks.append(track)
                 self.next_id += 1

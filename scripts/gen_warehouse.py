@@ -11,6 +11,7 @@ from worldgen import Box, ground, static_model, targets, world, write
 
 HALL = (32.0, 20.0, 8.0)
 WALL_T = 0.2
+WALL = "concrete"
 
 RACK = (2.6, 1.1, 4.0)
 DECK_Z = (0.25, 1.35, 2.45, 3.55)
@@ -74,13 +75,15 @@ def shell() -> str:
     lx, ly, lz = HALL
     grey = (0.72, 0.72, 0.70)
     walls = [
-        Box("wall_north", (0, ly / 2, lz / 2), (lx + 2 * WALL_T, WALL_T, lz), grey),
-        Box("wall_south", (0, -ly / 2, lz / 2), (lx + 2 * WALL_T, WALL_T, lz), grey),
-        Box("wall_east", (lx / 2, 0, lz / 2), (WALL_T, ly, lz), grey),
-        Box("wall_west", (-lx / 2, 0, lz / 2), (WALL_T, ly, lz), grey),
-        Box("roof", (0, 0, lz), (lx + 2 * WALL_T, ly + 2 * WALL_T, WALL_T), (0.35, 0.36, 0.38)),
+        Box("wall_north", (0, ly / 2, lz / 2), (lx + 2 * WALL_T, WALL_T, lz), grey, texture=WALL),
+        Box("wall_south", (0, -ly / 2, lz / 2), (lx + 2 * WALL_T, WALL_T, lz), grey, texture=WALL),
+        Box("wall_east", (lx / 2, 0, lz / 2), (WALL_T, ly, lz), grey, texture=WALL),
+        Box("wall_west", (-lx / 2, 0, lz / 2), (WALL_T, ly, lz), grey, texture=WALL),
+        Box("roof", (0, 0, lz), (lx + 2 * WALL_T, ly + 2 * WALL_T, WALL_T), (0.35, 0.36, 0.38),
+            texture=WALL),
     ]
-    # Painted bands give feature-poor walls something for visual odometry to track.
+    # Painted bands on top of the concrete: the texture carries the fine detail,
+    # these are the landmarks that tell one stretch of wall from another.
     for i, x in enumerate(range(-14, 15, 4)):
         for sy in (-1, 1):
             walls.append(Box(
@@ -146,7 +149,7 @@ def build(seed: int) -> str:
         for ci, x in enumerate(RACK_X)
     ]
     people, _ = targets(TARGET_SPOTS)
-    models = "\n\n".join([ground((0.42, 0.42, 0.44), (0.3, 0.3, 0.31)), shell(),
+    models = "\n\n".join([ground((1.0, 1.0, 1.0), "floor"), shell(),
                           floor_markings(), *racks, *obstacles(rng), *people])
     return world("warehouse", "gen_warehouse.py", seed, SCENE, lights(), models)
 

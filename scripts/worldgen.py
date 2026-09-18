@@ -18,6 +18,25 @@ ORIGIN_LATLON = (49.839700, 24.029700, 296.0)
 # Fuel meshes (CC BY 4.0), feet at the origin, ~1.6 m tall.
 PEOPLE = ("Nurse", "FemaleVisitor", "Scrubs")
 PERSON_SIZE = (0.5, 0.4, 1.62)
+TEXTURE_URI = "model://surfaces/materials/textures"
+
+
+def material(colour: tuple[float, float, float], texture: str | None, indent: str) -> list[str]:
+    """A flat colour, or that colour already baked into a texture."""
+    r, g, b = (1.0, 1.0, 1.0) if texture else colour
+    lines = [
+        f"{indent}<material>",
+        f"{indent}  <ambient>{r * 0.5:.3g} {g * 0.5:.3g} {b * 0.5:.3g} 1</ambient>",
+        f"{indent}  <diffuse>{r:.3g} {g:.3g} {b:.3g} 1</diffuse>",
+    ]
+    if texture:
+        lines += [
+            f"{indent}  <pbr><metal>",
+            f"{indent}    <albedo_map>{TEXTURE_URI}/{texture}.png</albedo_map>",
+            f"{indent}    <metalness>0</metalness><roughness>0.9</roughness>",
+            f"{indent}  </metal></pbr>",
+        ]
+    return [*lines, f"{indent}</material>"]
 
 
 @dataclass(frozen=True)
@@ -30,21 +49,18 @@ class Box:
     colour: tuple[float, float, float]
     collide: bool = True
     yaw: float = 0.0
+    texture: str | None = None      # a name under models/surfaces, see gen_textures.py
 
     def to_sdf(self, indent: str) -> str:
         x, y, z = self.pose
         sx, sy, sz = self.size
-        r, g, b = self.colour
         pose = f"{x:.4g} {y:.4g} {z:.4g} 0 0 {self.yaw:.4g}"
         geom = f"<geometry><box><size>{sx:.4g} {sy:.4g} {sz:.4g}</size></box></geometry>"
         parts = [
             f'{indent}<visual name="{self.name}_v">',
             f"{indent}  <pose>{pose}</pose>",
             f"{indent}  {geom}",
-            f"{indent}  <material>",
-            f"{indent}    <ambient>{r * 0.5:.3g} {g * 0.5:.3g} {b * 0.5:.3g} 1</ambient>",
-            f"{indent}    <diffuse>{r:.3g} {g:.3g} {b:.3g} 1</diffuse>",
-            f"{indent}  </material>",
+            *material(self.colour, self.texture, indent + "  "),
             f"{indent}</visual>",
         ]
         if self.collide:
@@ -88,9 +104,8 @@ def targets(spots) -> tuple[list[str], list[dict]]:
     return models, truth
 
 
-def ground(colour: tuple[float, float, float], ambient: tuple[float, float, float]) -> str:
-    r, g, b = colour
-    ar, ag, ab = ambient
+def ground(colour: tuple[float, float, float], texture: str | None = None) -> str:
+    body = "\n".join(material(colour, texture, " " * 10))
     return f"""    <model name="ground_plane">
       <static>true</static>
       <link name="link">
@@ -100,10 +115,7 @@ def ground(colour: tuple[float, float, float], ambient: tuple[float, float, floa
         </collision>
         <visual name="visual">
           <geometry><plane><normal>0 0 1</normal><size>200 200</size></plane></geometry>
-          <material>
-            <ambient>{ar:.3g} {ag:.3g} {ab:.3g} 1</ambient>
-            <diffuse>{r:.3g} {g:.3g} {b:.3g} 1</diffuse>
-          </material>
+{body}
         </visual>
       </link>
     </model>"""

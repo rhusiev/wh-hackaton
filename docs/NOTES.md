@@ -628,3 +628,36 @@ The frame question resolved itself: with ExternalNav the EKF's local frame
 starts at the drone, not at the world origin, and explore.py already measures
 the difference ("map -> local offset 13.46 0.04"). What breaks is the flying,
 not the bookkeeping.
+
+## A blank wall was our own doing, and texturing it bought most of the flight
+
+The worlds were built entirely from flat-coloured boxes - no texture anywhere -
+so a wall filled the frame as a single uniform grey. That is harsher than
+reality: a real warehouse wall has grain, stains and scuffs. The only concession
+was painted bands on the north and south walls every 4 m, which is close to the
+worst possible help, because identical marks at a regular spacing are what makes
+a feature matcher pair the wrong two.
+
+scripts/gen_textures.py now generates the surfaces procedurally. Two details
+mattered more than expected:
+
+- noise amplitude has to fall as the square root of the octave scale, not as the
+  scale. The usual 1/scale weighting is what stone looks like, but it leaves
+  nearly all the energy in the coarsest octave, and a smooth gradient has no
+  corners to track
+- seams have to be segments, not lines spanning the surface. Full lines cross
+  into a lattice and one intersection of a lattice looks exactly like the next
+
+Measured against ground truth, with the constant frame offset removed:
+
+| | before texture | after |
+| --- | --- | --- |
+| legs flown before failsafe | 0, timed out on the first | 5 and still going |
+| median drift | estimate never left the origin while the airframe slid 4.6 m | 0.09 m over the first quarter, 0.19 m overall |
+| worst single-step jump | - | 5.21 m |
+
+So visual odometry is accurate to about 10-20 cm right up until it fails, and
+then it fails all at once. That shape matters for what to build next: the
+failure is not noise to be filtered, it is a discrete jump of the whole frame,
+and a per-track constant-velocity filter would read it as every person in the
+building accelerating at once.

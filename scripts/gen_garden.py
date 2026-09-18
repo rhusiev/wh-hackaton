@@ -171,7 +171,7 @@ def build(seed: int) -> str:
     rng = random.Random(seed)
     trees = [tree(f"tree_{i}", x, y, rng) for i, (x, y) in enumerate(TREES)]
     people, _ = targets(TARGET_SPOTS)
-    models = "\n\n".join([ground((0.30, 0.50, 0.24), (0.20, 0.34, 0.16)), boundary(), house(),
+    models = "\n\n".join([ground((1.0, 1.0, 1.0), "grass"), boundary(), house(),
                           *trees, *hedges(), *furniture(rng), *people])
     return world("garden", "gen_garden.py", seed, SCENE, SUN, models)
 

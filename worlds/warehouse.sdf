@@ -136,8 +136,12 @@
         <visual name="visual">
           <geometry><plane><normal>0 0 1</normal><size>200 200</size></plane></geometry>
           <material>
-            <ambient>0.3 0.3 0.31 1</ambient>
-            <diffuse>0.42 0.42 0.44 1</diffuse>
+            <ambient>0.5 0.5 0.5 1</ambient>
+            <diffuse>1 1 1 1</diffuse>
+            <pbr><metal>
+              <albedo_map>model://surfaces/materials/textures/floor.png</albedo_map>
+              <metalness>0</metalness><roughness>0.9</roughness>
+            </metal></pbr>
           </material>
         </visual>
       </link>
@@ -151,8 +155,12 @@
           <pose>0 10 4 0 0 0</pose>
           <geometry><box><size>32.4 0.2 8</size></box></geometry>
           <material>
-            <ambient>0.36 0.36 0.35 1</ambient>
-            <diffuse>0.72 0.72 0.7 1</diffuse>
+            <ambient>0.5 0.5 0.5 1</ambient>
+            <diffuse>1 1 1 1</diffuse>
+            <pbr><metal>
+              <albedo_map>model://surfaces/materials/textures/concrete.png</albedo_map>
+              <metalness>0</metalness><roughness>0.9</roughness>
+            </metal></pbr>
           </material>
         </visual>
         <collision name="wall_north_c">
@@ -163,8 +171,12 @@
           <pose>0 -10 4 0 0 0</pose>
           <geometry><box><size>32.4 0.2 8</size></box></geometry>
           <material>
-            <ambient>0.36 0.36 0.35 1</ambient>
-            <diffuse>0.72 0.72 0.7 1</diffuse>
+            <ambient>0.5 0.5 0.5 1</ambient>
+            <diffuse>1 1 1 1</diffuse>
+            <pbr><metal>
+              <albedo_map>model://surfaces/materials/textures/concrete.png</albedo_map>
+              <metalness>0</metalness><roughness>0.9</roughness>
+            </metal></pbr>
           </material>
         </visual>
         <collision name="wall_south_c">
@@ -175,8 +187,12 @@
           <pose>16 0 4 0 0 0</pose>
           <geometry><box><size>0.2 20 8</size></box></geometry>
           <material>
-            <ambient>0.36 0.36 0.35 1</ambient>
-            <diffuse>0.72 0.72 0.7 1</diffuse>
+            <ambient>0.5 0.5 0.5 1</ambient>
+            <diffuse>1 1 1 1</diffuse>
+            <pbr><metal>
+              <albedo_map>model://surfaces/materials/textures/concrete.png</albedo_map>
+              <metalness>0</metalness><roughness>0.9</roughness>
+            </metal></pbr>
           </material>
         </visual>
         <collision name="wall_east_c">
@@ -187,8 +203,12 @@
           <pose>-16 0 4 0 0 0</pose>
           <geometry><box><size>0.2 20 8</size></box></geometry>
           <material>
-            <ambient>0.36 0.36 0.35 1</ambient>
-            <diffuse>0.72 0.72 0.7 1</diffuse>
+            <ambient>0.5 0.5 0.5 1</ambient>
+            <diffuse>1 1 1 1</diffuse>
+            <pbr><metal>
+              <albedo_map>model://surfaces/materials/textures/concrete.png</albedo_map>
+              <metalness>0</metalness><roughness>0.9</roughness>
+            </metal></pbr>
           </material>
         </visual>
         <collision name="wall_west_c">
@@ -199,8 +219,12 @@
           <pose>0 0 8 0 0 0</pose>
           <geometry><box><size>32.4 20.4 0.2</size></box></geometry>
           <material>
-            <ambient>0.175 0.18 0.19 1</ambient>
-            <diffuse>0.35 0.36 0.38 1</diffuse>
+            <ambient>0.5 0.5 0.5 1</ambient>
+            <diffuse>1 1 1 1</diffuse>
+            <pbr><metal>
+              <albedo_map>model://surfaces/materials/textures/concrete.png</albedo_map>
+              <metalness>0</metalness><roughness>0.9</roughness>
+            </metal></pbr>
           </material>
         </visual>
         <collision name="roof_c">
