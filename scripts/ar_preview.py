@@ -23,11 +23,15 @@ Three things can sit behind the overlay, and --camera picks which:
 Only a camera of your own has a field of view that must be told (--hfov): the
 wireframe and the drone's image are drawn with the one the overlay assumes.
 
-    W S     walk forward and back        arrows or I J K L    look around
+    W S     walk forward and back        I J K L or arrows    look around
     A D     step left and right          q or Escape          quit
 
 Looking left and right turns the wearer; looking up and down pitches the view
 without leaving the floor, the way a head does.
+
+Either window takes the keys, but the arrows only reach here from the minimap:
+OpenCV is built against Qt, whose image widget scrolls itself with them once the
+picture is bigger than the window. I J K L is the pair that always works.
 
 The camera and the feed run at different rates, so they are read separately: the
 newest payload is kept by a background task and drawn onto whatever camera frame

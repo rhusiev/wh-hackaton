@@ -708,3 +708,16 @@ back to nominal. `./run.sh sim` now sweeps them first, and it decides what is an
 orphan by asking whether any sim is running at all, because neither side can see
 the other's processes: the host's `fuser` cannot look into the container's PID
 namespace, and the container cannot look out.
+
+## The arrow keys reach OpenCV from one window and not the other
+
+`ar_preview.py` opens two windows and reads keys with `cv2.waitKeyEx`, which
+returns the whole key code - plain `waitKey` keeps only the low byte, so GTK's
+65361 for Left arrives as 113, which is `q`, and quits.
+
+Even with the full code, the arrows only arrive from the minimap window. This
+build of OpenCV is Qt5 (`cv2.getBuildInformation()`, `GUI: QT5`), and its image
+widget scrolls itself with the arrows once the picture is larger than the
+window, which the 640x400 glasses view usually is and the small minimap is not.
+Nothing in our code sees those presses. I J K L does the same thing and is never
+swallowed, so that is the pair to document.
