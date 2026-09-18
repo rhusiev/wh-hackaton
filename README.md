@@ -52,7 +52,7 @@ To check that everything works, or to see what the drone and the glasses see:
 
 ```bash
 ./run.sh smoke    # prints PASS/FAIL for every topic and link
-./run.sh demo     # colour with people and head boxes, next to depth
+./run.sh demo     # colour with people and head boxes, and depth, one window each
 ./run.sh preview  # the minimap and the through-the-wall view the glasses get
 ./run.sh score    # which of the 6 hidden people were found, and how accurately
 ```

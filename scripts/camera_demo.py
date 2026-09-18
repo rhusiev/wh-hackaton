@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Show the OAK-D colour image next to its depth, false-coloured over the 0.7-30 m range.
+"""Show the OAK-D colour image and its depth, false-coloured over the 0.7-30 m range.
 
 People and heads from /oak/detections_2d are drawn on the colour image.
 
-    ./run.sh demo                  # live window
+    ./run.sh demo                  # one resizable window each
     ./run.sh demo --save demo.png  # write one frame and exit, for headless hosts
 """
 
@@ -24,7 +24,7 @@ from stereo import DEPTH_MAX, DEPTH_MIN
 # The detector runs slower than the camera, so its boxes are drawn on later frames too.
 DETECTION_MAX_AGE = 0.5
 BOX_COLOURS = {"person": (0, 0, 255), "head": (0, 255, 255)}
-WINDOW = "OAK-D colour | depth"
+WINDOWS = ("OAK-D colour", "OAK-D depth")
 
 
 def colourize(depth: np.ndarray) -> np.ndarray:
@@ -50,24 +50,26 @@ class CameraDemo(Node):
         self.create_subscription(Detection2DArray, "/oak/detections_2d",
                                  lambda msg: setattr(self, "detections", msg), 10)
         if not save:
-            # WINDOW_NORMAL lets the window be dragged to any size and scales the frame
-            # into it; KEEPRATIO stops that scaling from stretching the pair.
-            cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
+            # WINDOW_NORMAL lets a window be dragged to any size and scales the frame
+            # into it; KEEPRATIO stops that scaling from stretching the image.
+            for name in WINDOWS:
+                cv2.namedWindow(name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
 
     def on_frames(self, colour: Image, depth: Image) -> None:
         left = self.bridge.imgmsg_to_cv2(colour, "bgr8")
         self.draw_detections(left, _seconds(colour) - _seconds(self.detections))
         metres = self.bridge.imgmsg_to_cv2(depth, "32FC1")
-        frame = np.hstack([left, colourize(metres)])
+        right = colourize(metres)
         distance = metres[depth.height // 2, depth.width // 2]
         label = f"centre {distance:.2f} m" if np.isfinite(distance) else "centre out of range"
-        cv2.putText(frame, label, (left.shape[1] + 10, 25),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        cv2.putText(right, label, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         if self.save:
-            cv2.imwrite(self.save, frame)
+            # A file cannot be two windows, so --save keeps them side by side.
+            cv2.imwrite(self.save, np.hstack([left, right]))
             self.get_logger().info(f"wrote {self.save}")
             raise SystemExit
-        cv2.imshow(WINDOW, frame)
+        cv2.imshow(WINDOWS[0], left)
+        cv2.imshow(WINDOWS[1], right)
         if cv2.waitKey(1) in (ord("q"), 27):
             raise SystemExit
 
