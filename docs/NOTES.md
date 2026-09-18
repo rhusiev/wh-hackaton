@@ -679,3 +679,32 @@ guess loses on a slower machine, and nothing reports that it lost.
 
 The aircraft is now part of the generated world, in `worldgen.py`, so it is in
 the first snapshot and the race cannot happen.
+
+## Half the camera rate was 2500 dead files in /dev/shm
+
+For two sessions the wall textures were blamed for the sensor rates: colour and
+depth ran at 5-7 Hz against a nominal 15, and turning the textures off appeared
+to help. It was never the textures. With the textures on and nothing else
+changed, the smoke test now reports 0 failures at 14-15 Hz on every sensor topic
+and RTF 0.92.
+
+The tell was `/camera/camera_info` at 15.1 Hz while `/camera/image_raw` from the
+same sensor managed 5.6 Hz. Both are published by one Gazebo sensor in one step,
+so the renderer was keeping up and the images were being lost after it - in
+transport, not in rendering.
+
+Fast DDS carries them over shared memory, and `config/fastdds.xml` asks for a
+16 MB segment per participant because the 512 KB default is smaller than one
+640x400 depth frame. A process that is killed rather than shut down never
+unlinks its segment, and `docker-compose.yml` runs the container with
+`ipc: host`, so every one of those orphans lands in the host's `/dev/shm` and
+stays there across runs, reboot to reboot. There were 2526 of them holding
+13 GB of 16 GB, the oldest a year old. With no room for a new segment Fast DDS
+does not fail - it falls back to fragmented UDP, where a frame split across
+dozens of datagrams loses one and is discarded whole.
+
+Deleting only the `fastrtps_*` files took `/dev/shm` to 2.3 MB and the rates
+back to nominal. `./run.sh sim` now sweeps them first, and it decides what is an
+orphan by asking whether any sim is running at all, because neither side can see
+the other's processes: the host's `fuser` cannot look into the container's PID
+namespace, and the container cannot look out.

@@ -28,6 +28,7 @@ ARRIVE_RADIUS = 0.6
 LEG_TIMEOUT = 60.0
 YAW_TOLERANCE = 0.15
 SETTLE = 1.0  # lets the map catch up with a turn
+AIRBORNE = 0.5  # m, above this the drone is flying rather than sitting on its skids
 
 
 @dataclass
@@ -100,9 +101,17 @@ class Flight(Copter):
     def take_off(self) -> None:
         self.require(lambda: self.local is not None and self._has_pose(),
                      f"local position and {self.map_frame} -> {self.body_frame}")
-        self.arm_and_takeoff(self.altitude)
-        self.require(lambda: self.local.pose.position.z > self.altitude - 0.3,
-                     f"climb to {self.altitude} m", timeout=60.0)
+        # A run stopped in mid-air leaves the drone armed and hovering, and ArduPilot
+        # refuses to take off from a height it is already at. Resuming instead of
+        # taking off again lets the first leg of the mission fly it back to altitude.
+        if self.state.armed and self.local.pose.position.z > AIRBORNE:
+            self.get_logger().info(
+                f"already flying at {self.local.pose.position.z:.1f} m, resuming")
+            self.guided()
+        else:
+            self.arm_and_takeoff(self.altitude)
+            self.require(lambda: self.local.pose.position.z > self.altitude - 0.3,
+                         f"climb to {self.altitude} m", timeout=60.0)
         x, y = self.here()
         local = self.local.pose.position
         self.offset = local.x - x, local.y - y

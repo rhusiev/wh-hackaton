@@ -24,6 +24,22 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
+# A killed ROS process leaves its 16 MB shared-memory segment behind, and with
+# ipc: host they pile up across runs until /dev/shm is full. Fast DDS then quietly
+# falls back to fragmented UDP, which drops most of a 640x400 image, so the sim
+# looks slow rather than broken - 2500 orphans filling 13 GB cost us half the
+# camera rate before we found them.
+#
+# Whether a segment is live cannot be answered from the host, whose fuser cannot
+# see into the container, nor from inside it, which cannot see the host. So the
+# question asked instead is whether any sim is running at all: if none is, every
+# segment is an orphan. Run ROS on the host as well and this would clear it too.
+sweep_shm() {
+    docker compose exec -u root -T sim bash -lc \
+        'pgrep -f "gz sim|mavros_node|parameter_bridge" >/dev/null || rm -f /dev/shm/fastrtps_*' \
+        2>/dev/null || true
+}
+
 exec_in() {
     docker compose exec -u ubuntu -e WIPE="${WIPE:-0}" -e CONSOLE="${CONSOLE:-1}" -e MAP="${MAP:-0}" \
         -e WORLD="${WORLD:-warehouse}" sim bash -lc "$1"
@@ -39,7 +55,8 @@ case "${cmd}" in
     up)    xhost +local:docker >/dev/null 2>&1 || true
            docker compose up -d "$@" ;;
     down)  docker compose down "$@" ;;
-    sim)   exec_in "ros2 launch launch/tricopter_sim.launch.py $*" ;;
+    sim)   sweep_shm
+           exec_in "ros2 launch launch/tricopter_sim.launch.py $*" ;;
     sitl)  exec_in "./scripts/run_sitl.sh $*" ;;
     explore) exec_in "./scripts/explore.py $*" ;;
     score) exec_in "./scripts/score_search.py $*" ;;

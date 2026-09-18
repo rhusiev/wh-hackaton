@@ -52,12 +52,14 @@ class Copter(Node):
         if not self.wait(predicate, timeout):
             raise TimeoutError(f"timed out waiting for {what}")
 
-    def arm_and_takeoff(self, altitude: float) -> None:
+    def guided(self) -> None:
         self.require(lambda: self.state.connected, "MAVROS to connect to the FCU")
-
         self.get_logger().info("switching to GUIDED")
         self.call(self.set_mode, SetMode.Request(custom_mode="GUIDED"))
         self.require(lambda: self.state.mode == "GUIDED", "GUIDED mode")
+
+    def arm_and_takeoff(self, altitude: float) -> None:
+        self.guided()
 
         # Arming is refused until the EKF settles, so keep asking.
         self.get_logger().info("arming")
