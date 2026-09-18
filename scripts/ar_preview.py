@@ -3,12 +3,16 @@
 
 Left is the minimap: the grid, the drone and every tracked person with their head.
 A person no longer where they were last seen is drawn pale, with how long ago.
-Right is the wallhack view of someone standing at --viewer: each person's box and
-head box projected into their sight, through walls, with the distance.
+Right is the wallhack view of the wearer, who starts at --viewer and can be walked
+around: each person's box and head box projected into their sight, through walls,
+with the distance.
 
     ./run.sh preview                          # live window
     ./run.sh preview --save ar.png            # one frame to a file
-    ./run.sh preview --viewer -15 0 0         # x, y and yaw of the wearer
+    ./run.sh preview --viewer -15 0 0         # x, y and yaw the wearer starts at
+
+W and S walk, A and D turn, q or Escape quits. The keys are read between frames
+of the feed, so holding one moves at the feed's rate rather than the keyboard's.
 """
 
 from __future__ import annotations
@@ -26,6 +30,8 @@ import websockets
 MINIMAP_SCALE = 16          # px per m
 VIEW_W, VIEW_H, VIEW_HFOV = 640, 400, math.radians(60)
 EYE_HEIGHT = 1.7
+STEP = 0.5                  # m per keypress, about a stride
+TURN = math.radians(10)
 GRID_COLOURS = np.array([[235, 235, 235], [40, 40, 40], [150, 150, 150]], dtype=np.uint8)
 PERSON, HEAD, DRONE, WEARER = (0, 90, 255), (0, 220, 255), (200, 80, 0), (60, 160, 60)
 LOST = (140, 140, 200)
@@ -128,6 +134,21 @@ def compose(frame: dict, viewer: tuple[float, float, float]) -> np.ndarray:
     return np.hstack([pad(left), pad(right)])
 
 
+def walk(viewer: tuple[float, float, float], key: int) -> tuple[float, float, float]:
+    """W and S step along the way the wearer faces, A and D turn on the spot."""
+    x, y, yaw = viewer
+    match chr(key & 0xFF).lower():
+        case "w":
+            return x + STEP * math.cos(yaw), y + STEP * math.sin(yaw), yaw
+        case "s":
+            return x - STEP * math.cos(yaw), y - STEP * math.sin(yaw), yaw
+        case "a":
+            return x, y, yaw + TURN
+        case "d":
+            return x, y, yaw - TURN
+    return viewer
+
+
 async def show(url: str, viewer: tuple[float, float, float], save: str | None) -> None:
     async with websockets.connect(url) as socket:
         while True:
@@ -137,8 +158,10 @@ async def show(url: str, viewer: tuple[float, float, float], save: str | None) -
                 print(f"wrote {save}")
                 return
             cv2.imshow("AR preview", image)
-            if cv2.waitKey(1) in (ord("q"), 27):
+            key = cv2.waitKey(1)
+            if key in (ord("q"), 27):
                 return
+            viewer = walk(viewer, key)
 
 
 def main() -> None:
@@ -146,7 +169,7 @@ def main() -> None:
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--url", default="ws://localhost:8790")
     parser.add_argument("--viewer", type=float, nargs=3, default=(-15.5, 0.0, 0.0),
-                        metavar=("X", "Y", "YAW"), help="where the wearer stands, map frame")
+                        metavar=("X", "Y", "YAW"), help="where the wearer starts, map frame")
     parser.add_argument("--save", help="write one frame to this path and exit")
     args = parser.parse_args()
     try:

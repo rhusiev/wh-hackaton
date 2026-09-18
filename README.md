@@ -75,7 +75,7 @@ Stop with Ctrl+C in terminal 1, and `./run.sh down` to remove the container
 ./run.sh sim sitl:=true detector:=none      # no detector, run your own (also mapper:=false, ar:=false)
 ./run.sh explore --lanes 2                  # shorter demo flight
 ./run.sh demo --save frame.png              # one frame to a file, no window needed
-./run.sh preview --viewer -15 0 0           # glasses view from x, y, yaw
+./run.sh preview --viewer -15 0 0           # glasses view from x, y, yaw; WASD walks and turns
 ./run.sh shell                              # a shell inside the container
 ```
 
