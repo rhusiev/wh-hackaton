@@ -13,8 +13,12 @@ see-through and would send only the overlay.
     ./run.sh preview --save ar.png            # one frame to a file
     ./run.sh preview --viewer -15 0 0         # x, y and yaw the wearer starts at
 
+The two are separate windows, each resizable on its own and scaling its contents
+to fit. --save has no windows to split, so it writes them side by side.
+
 W and S walk, A and D turn, q or Escape quits. The keys are read between frames
-of the feed, so holding one moves at the feed's rate rather than the keyboard's.
+of the feed, so holding one moves at the feed's rate rather than the keyboard's,
+and they reach either window - whichever has focus.
 """
 
 from __future__ import annotations
@@ -42,7 +46,10 @@ GRID_COLOURS = np.array([[235, 235, 235], [40, 40, 40], [150, 150, 150]], dtype=
 OCCUPIED = 1                # the index into GRID_COLOURS the mapper marks obstacles with
 PERSON, HEAD, DRONE, WEARER = (0, 90, 255), (0, 220, 255), (200, 80, 0), (60, 160, 60)
 LOST = (140, 140, 200)
-WALL = (90, 90, 90)
+WALL, FLOOR, HORIZON = (90, 90, 90), (55, 55, 55), (45, 45, 45)
+FLOOR_STEP, FLOOR_EXTENT = 2.0, 24.0    # m between floor lines, and how far they run
+FADE_FULL, FADE_MIN = 30.0, 0.3         # a line is dimmest this far off, but never darker
+WINDOWS = ("AR view", "minimap")
 
 
 def colour(target: dict) -> tuple[int, int, int]:
@@ -127,11 +134,12 @@ def wallhack(frame: dict, viewer: tuple[float, float, float]) -> np.ndarray:
                       colour, 2)
         return depth
 
-    def edge(a: np.ndarray, b: np.ndarray, za: float, zb: float) -> None:
+    def edge(a: np.ndarray, b: np.ndarray, za: float, zb: float, base=WALL) -> None:
         """A line between two map points, cut where it would pass behind the wearer.
 
         Depth comes from x and y alone, so the crossing is found in the plan and the
-        height is carried along it.
+        height is carried along it. The line dims with distance, which is the only
+        depth cue a wireframe has.
         """
         da, db = float((a - (vx, vy)) @ forward), float((b - (vx, vy)) @ forward)
         if da < NEAR and db < NEAR:
@@ -143,8 +151,21 @@ def wallhack(frame: dict, viewer: tuple[float, float, float]) -> np.ndarray:
             else:
                 b, zb = a + t * (b - a), za + t * (zb - za)
         start, end = project(*a, za), project(*b, zb)
-        if start and end:
-            cv2.line(image, (int(start[0]), int(start[1])), (int(end[0]), int(end[1])), WALL, 1)
+        if not (start and end):
+            return
+        shade = max(FADE_MIN, 1.0 - (da + db) / 2 / FADE_FULL)
+        cv2.line(image, (int(start[0]), int(start[1])), (int(end[0]), int(end[1])),
+                 tuple(c * shade for c in base), 1)
+
+    cv2.line(image, (0, VIEW_H // 2), (VIEW_W, VIEW_H // 2), HORIZON, 1)
+    # Lines on whole multiples of the step, so the floor stays put as the wearer walks.
+    near_x, near_y = (math.floor(c / FLOOR_STEP) * FLOOR_STEP for c in (vx, vy))
+    for offset in np.arange(-FLOOR_EXTENT, FLOOR_EXTENT + FLOOR_STEP, FLOOR_STEP):
+        x, y = near_x + offset, near_y + offset
+        edge(np.array([near_x - FLOOR_EXTENT, y]), np.array([near_x + FLOOR_EXTENT, y]),
+             0.0, 0.0, FLOOR)
+        edge(np.array([x, near_y - FLOOR_EXTENT]), np.array([x, near_y + FLOOR_EXTENT]),
+             0.0, 0.0, FLOOR)
 
     if frame.get("map"):
         for polygon in outlines(frame["map"]):
@@ -152,6 +173,13 @@ def wallhack(frame: dict, viewer: tuple[float, float, float]) -> np.ndarray:
                 edge(a, b, 0.0, 0.0)
                 edge(a, b, WALL_H, WALL_H)
                 edge(a, a, 0.0, WALL_H)
+
+    if frame.get("drone"):
+        d = frame["drone"]
+        if box(d["x"], d["y"], d["z"], 0.6, 0.3, DRONE) is not None:
+            u, v, _ = project(d["x"], d["y"], d["z"])
+            cv2.putText(image, "drone", (int(u) - 18, int(v) - 12),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, DRONE, 1)
 
     labels: list[tuple[int, int, int, int]] = []
     for target in sorted(frame["targets"], key=lambda t: -math.dist((t["x"], t["y"]), (vx, vy))):
@@ -179,6 +207,7 @@ def wallhack(frame: dict, viewer: tuple[float, float, float]) -> np.ndarray:
 
 
 def compose(frame: dict, viewer: tuple[float, float, float]) -> np.ndarray:
+    """The two panes side by side, for --save: a file cannot be two windows."""
     left, right = minimap(frame, viewer), wallhack(frame, viewer)
     height = max(left.shape[0], right.shape[0])
     pad = lambda img: cv2.copyMakeBorder(img, 0, height - img.shape[0], 0, 0,
@@ -202,14 +231,20 @@ def walk(viewer: tuple[float, float, float], key: int) -> tuple[float, float, fl
 
 
 async def show(url: str, viewer: tuple[float, float, float], save: str | None) -> None:
+    if not save:
+        # WINDOW_NORMAL lets the window be dragged to any size and scales the frame
+        # into it; KEEPRATIO stops that scaling from stretching the view.
+        for name in WINDOWS:
+            cv2.namedWindow(name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
     async with websockets.connect(url) as socket:
         while True:
-            image = compose(json.loads(await socket.recv()), viewer)
+            frame = json.loads(await socket.recv())
             if save:
-                cv2.imwrite(save, image)
+                cv2.imwrite(save, compose(frame, viewer))
                 print(f"wrote {save}")
                 return
-            cv2.imshow("AR preview", image)
+            cv2.imshow(WINDOWS[0], wallhack(frame, viewer))
+            cv2.imshow(WINDOWS[1], minimap(frame, viewer))
             key = cv2.waitKey(1)
             if key in (ord("q"), 27):
                 return
