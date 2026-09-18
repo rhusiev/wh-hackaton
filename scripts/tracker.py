@@ -6,9 +6,11 @@ ar_bridge.py only depends on those two calls, so any class with them works.
 
 NearestTracker keeps a confidence per track as log-odds. A sighting raises it. A
 frame where the track was in plain view, close and unoccluded, but not detected
-lowers it. The whole person, feet to head, has to be in frame, and the frame's
-own depth image has to measure nothing in front of them. A track goes through
-three statuses:
+lowers it - but only once the track has gone GRACE seconds unseen, because a
+detector that finds a distant person every other frame is not evidence that
+nobody is there. The whole person, feet to head, has to be in frame, and the
+frame's own depth image has to measure nothing in front of them. A track goes
+through three statuses:
 
 - candidate: not sure yet. It is confirmed once it has min_hits sightings and
   enough confidence, and deleted once the misses outweigh the sightings
@@ -37,6 +39,7 @@ CONFIRM = 2.0            # with min_hits, about 6 clean sightings
 UNCONFIRM = 0.0          # a confirmed track is lost below this
 REJECT = -2.0            # and a candidate deleted
 LOG_ODDS_MAX = 6.0
+GRACE = 2.0              # s unseen before misses count, about 8 detector frames
 WALK_SPEED = 1.0         # m/s, how far an unseen person may have gone
 MAX_WALK = 5.0           # m, beyond which a new person is someone else
 MOVED = 0.5              # m, a sighting this far off is a step, not stereo noise
@@ -129,8 +132,9 @@ class NearestTracker:
                visible: Callable[[np.ndarray, float], bool]) -> None:
         seen = self.associate([s for s in sightings if s.xyz[2] + s.height / 2 <= self.max_top], now)
         for track in self._tracks:
-            if track not in seen and all(visible(track.xyz + [0, 0, dz], self.miss_range)
-                                         for dz in (-track.height / 2, track.height / 2)):
+            if (track not in seen and now - track.last_seen >= GRACE
+                    and all(visible(track.xyz + [0, 0, dz], self.miss_range)
+                            for dz in (-track.height / 2, track.height / 2))):
                 track.belief = max(track.belief - MISS, REJECT)
         for track in seen:
             self.merge_into(track)

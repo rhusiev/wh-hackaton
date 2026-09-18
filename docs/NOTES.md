@@ -493,3 +493,64 @@ for it. The frame's own depth image answers the question directly: sample the
 pixels where the person should be and compare with their distance. Nothing to
 accumulate, nothing to age, and it fails exactly where the detector fails
 
+
+## A mapped place is not a searched place
+
+Frontier exploration of the warehouse ran out of frontiers 78 s after take-off,
+reported the map complete, and had found 2 of the 6 people. It was right about
+the map: 14071 of the grid's cells were known free, the whole 32 x 20 m hall,
+and every unknown cell left was outside the walls. A level laser slice sees a
+hall from a handful of positions, because each scan reaches to the far wall,
+while the camera that finds people covers a 0.6 rad cone about 7 m deep. The two
+finish at completely different times, and nothing in the occupancy grid records
+the difference. Coverage (`scripts/coverage.py`) is the second grid that does,
+and the explorer only stops once that one is finished too
+
+
+## The escape hatch out of the clearance margin was a hole in it
+
+The drone may end a leg inside the 1.0 m margin the planner keeps around
+obstacles, so `passable_cells()` marked a square around its current cell
+passable to let it leave. The square was unconditional and 2 x margin wide - at
+0.2 m cells, 2.2 x 2.2 m of margin switched off wherever the drone happened to
+be. Next to a rack that is a hole the path planner routes straight through: run
+8 touched `rack_2_1/upright_3_c` twice, -0.21 m at (-3.9, 3.2), while flying to
+a watch station 1.3 m from the post. Runs 3 to 7 never hit anything only because
+they never planned from that close to a rack. An escape has to be relative, not
+absolute: inside the box the drone may only cross cells whose distance to the
+nearest obstacle is at least the distance it already has, so it can always get
+out and can never get closer
+
+Closing the hole moved the cost elsewhere: run 9 had 0 contacts but 13 "could
+not reach station" warnings against run 8's 1. Watch stations were picked from
+every cell the breadth-first search could reach, and that search starts inside
+the escape box, so spots only reachable through it were chosen. By the time the
+drone had flown to the previous station the box was somewhere else and the goal
+was unreachable. An escape is for crossing, not for aiming at, so watch
+stations are now restricted to cells clear on their own (`clear_cells()`) while
+paths may still cross the box. Restricting frontier goals the same way was a
+mistake and was reverted: a frontier cell is by definition next to unknown
+space, unknown space is usually right behind an obstacle, and demanding a full
+1.0 m of room discards most real frontiers. Run 10 then never exhausted them at
+all - 585 legs in its 600 s budget, so the coverage phase never started and the
+score fell to 1 of 6
+
+
+## Exploration was chasing frontiers on the other side of the wall
+
+Runs 9 to 13 never finished exploring: all 600 s went on frontier legs, so the
+coverage phase never started and the score fell to 4 of 6. The goals tell the
+story - (-7.1, 10.5), (7.7, 11.5), (-0.5, -13.1), all outside a hall that ends
+at y = +-10, while the drone itself never left it. A level laser slice maps the
+ground outside through every gap in a wall, those cells are free and next to
+unknown, and the breadth-first search calls them reachable, so the planner kept
+picking them. The map therefore kept growing and no frontier ever ran out. Run 8
+only escaped it because the old oversized escape box let the drone squeeze
+through and clear them.
+
+Two things were missing. The explore loop wrote a goal off only when a leg
+outright failed, so a goal it could approach but never arrive at was chased for
+ever - it now gives up after GIVE_UP legs on the same one, the rule travel()
+already used. And "still exploring" was tested as "did the known-cell count go
+up at all", which map noise guarantees for ever; it now takes GROWTH cells of
+real growth within STALE seconds

@@ -5,6 +5,12 @@ and looking into the unknown grows the map until no reachable frontier is left.
 plan(), plan_view() and plan_path() are the planner on its own; leg(), travel()
 and look_at() fly a plan; FrontierExplorer puts them together.
 
+A complete map is not a searched place, so the explorer does not stop there: it
+then flies to whatever the camera has never had in view (coverage.py) until
+there is nothing left to look at. It switches over as soon as chasing frontiers
+stops paying, whether none is left or the map has simply not grown for STALE
+seconds, and switches back if a look reveals new ground.
+
 Between legs it also takes a closer look at candidates, people the tracker is not
 sure of yet: it flies to a spot a few metres away with a clear view, faces them
 and hovers. A real person keeps being detected and gets confirmed, a false one
@@ -23,6 +29,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from scipy import ndimage
 
+from coverage import HALF_FOV, LOOK_RANGE, Coverage
 from occupancy import OCCUPIED, UNKNOWN, Grid
 
 if TYPE_CHECKING:
@@ -40,6 +47,13 @@ INSPECT_RANGE = 5.0      # from 2.8 m up the feet leave the frame closer than ab
 INSPECT_HOVER = 3.0      # s of looking, ~12 detector frames
 MAX_INSPECTIONS = 2
 APART = 1.0              # rad between one look at a spot and the next
+
+# Places the map knows but the camera never had in view.
+MIN_LOOK = 12            # cells, about half a square metre, below which a gap is not worth a trip
+LOOK_HOVER = 2.0         # s of looking at one
+STALE = 60.0             # s without real growth before frontiers are not worth chasing
+GROWTH = 100             # cells, 4 m2: fewer than this in STALE is noise, not exploring
+GIVE_UP = 12             # legs spent on one frontier before it is written off
 
 NEIGHBOURS = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
 
@@ -80,15 +94,31 @@ def _line_clear(passable: np.ndarray, a: tuple[int, int], b: tuple[int, int]) ->
     return bool(passable[rows, cols].all())
 
 
+def _free(grid: Grid) -> np.ndarray:
+    return (grid.cells >= 0) & (grid.cells < OCCUPIED)
+
+
+def room_around(grid: Grid) -> np.ndarray:
+    """Cells to the nearest occupied cell, for every cell."""
+    return ndimage.distance_transform_edt(grid.cells < OCCUPIED)
+
+
+def clear_cells(grid: Grid, clearance: float, room: np.ndarray | None = None) -> np.ndarray:
+    """Known free cells at least clearance away from anything occupied."""
+    room = room_around(grid) if room is None else room
+    return _free(grid) & (room > math.ceil(clearance / grid.resolution))
+
+
 def passable_cells(grid: Grid, start_cell: tuple[int, int], clearance: float) -> np.ndarray:
-    free = (grid.cells >= 0) & (grid.cells < OCCUPIED)
     margin = math.ceil(clearance / grid.resolution)
-    passable = free & ~ndimage.binary_dilation(grid.cells >= OCCUPIED, _disk(margin))
-    # The drone may hover inside the clearance margin; it still has to leave from there.
+    room = room_around(grid)
+    passable = clear_cells(grid, clearance, room)
+    # The drone may hover inside the clearance margin; it still has to leave from there,
+    # but only through cells no closer to anything than the one it is already in.
     escape = np.zeros_like(passable)
     escape[max(start_cell[0] - margin, 0):start_cell[0] + margin + 1,
            max(start_cell[1] - margin, 0):start_cell[1] + margin + 1] = True
-    passable |= escape & free
+    passable |= escape & _free(grid) & (room >= room[start_cell])
     passable[start_cell] = True
     return passable
 
@@ -270,6 +300,8 @@ class FrontierExplorer:
     def __init__(self, args: argparse.Namespace) -> None:
         self.max_time, self.inspect_candidates = args.max_time, not args.no_inspect
         self.inspections: dict[int, int] = {}
+        self.coverage = Coverage(LOOK_RANGE, HALF_FOV)
+        self.attempted: list[tuple[float, float]] = []
 
     def run(self, flight: Flight) -> None:
         log = flight.get_logger()
@@ -279,24 +311,93 @@ class FrontierExplorer:
 
         deadline = flight.get_clock().now().nanoseconds + int(self.max_time * 1e9)
         visited: list[tuple[float, float]] = []
+        known, grew = 0, flight.get_clock().now().nanoseconds
+        chasing, spent = None, 0
         while flight.get_clock().now().nanoseconds < deadline:
+            self.look(flight)
             if self.inspect_candidates:
                 self.inspect(flight)
-            goal = plan(flight.grid(), flight.here(), CLEARANCE, MIN_CELLS, visited, VISITED_RADIUS)
+            now = flight.get_clock().now().nanoseconds
+            grid = flight.grid()
+            if (fresh := int((grid.cells >= 0).sum())) > known + GROWTH:
+                known, grew = fresh, now
+            stale = now - grew > STALE * 1e9
+            goal = None if stale else plan(grid, flight.here(), CLEARANCE, MIN_CELLS,
+                                           visited, VISITED_RADIUS)
             if goal is None:
-                log.info("no reachable frontier left")
-                break
+                # The map can be complete while most of it has never been in frame: a level
+                # laser slice maps a hall from a few spots, a person is only found by looking.
+                log.info(f"{'map has stopped growing' if stale else 'no reachable frontier left'}"
+                         ", looking at what the camera has missed")
+                if not self.look_at_gap(flight):
+                    log.info("nothing left unlooked at")
+                    break
+                continue
+            # Cells beyond a wall are mapped through gaps in it and look reachable, so a
+            # frontier the drone keeps aiming at without arriving is one it cannot have.
+            target = goal.path[-1]
+            if chasing is None or math.dist(chasing, target) > VISITED_RADIUS:
+                chasing, spent = target, 0
+            spent += 1
+            if spent > GIVE_UP:
+                log.info(f"giving up on the frontier at ({target[0]:.1f}, {target[1]:.1f})")
+                visited.append(target)
+                chasing = None
+                continue
             arrived = leg(flight, goal)
             if arrived is None:
-                visited.append(goal.path[-1])
+                visited.append(target)
+                chasing = None
             elif arrived:
                 flight.turn(goal.look_yaw)
                 visited.append(flight.here())
+                chasing = None
         else:
             log.info(f"stopped after {self.max_time:.0f} s")
         if self.inspect_candidates:
             self.inspect(flight)
         log.info("holding")
+
+    def look(self, flight: Flight) -> None:
+        """Remember what the camera has in view from where it is now."""
+        self.coverage.mark(flight.grid(), flight.here(), flight.heading())
+
+    def look_at_gap(self, flight: Flight) -> bool:
+        """Go and look at the mapped place the camera has never had in view that is worth most."""
+        grid = flight.grid()
+        here = flight.here()
+        gaps = self.coverage.unseen(grid)
+        rows, cols = np.mgrid[0:gaps.shape[0], 0:gaps.shape[1]]
+        for x, y in self.attempted:
+            r, c = grid.cell(x, y)
+            gaps &= (rows - r) ** 2 + (cols - c) ** 2 > (VISITED_RADIUS / grid.resolution) ** 2
+
+        labels, count = ndimage.label(gaps, structure=np.ones((3, 3), bool))
+        sizes = np.bincount(labels.ravel(), minlength=count + 1)
+        worth = gaps & (sizes[labels] >= MIN_LOOK)
+        # Only what can be looked at from somewhere the drone can actually reach. Free cells
+        # beyond a wall are mapped through doorways and gaps and would otherwise be chased.
+        start_cell = grid.cell(*here)
+        steps, _ = distances(passable_cells(grid, start_cell, CLEARANCE), start_cell)
+        worth &= ndimage.binary_dilation(steps >= 0, _disk(round(INSPECT_RANGE / grid.resolution)))
+        if not worth.any():
+            return False
+
+        # The gap worth the trip is the one where a look uncovers most for the flying it costs,
+        # not the nearest cell: one look covers a cone, so chasing the nearest crawls.
+        span = round(LOOK_RANGE / grid.resolution)
+        crowd = ndimage.uniform_filter(worth.astype(np.float32), size=span)
+        xs, ys = grid.point(rows, cols)
+        score = np.where(worth, crowd / (1 + np.hypot(xs - here[0], ys - here[1])), 0.0)
+        cell = np.unravel_index(int(score.argmax()), score.shape)
+        target = grid.point(*cell)
+        flight.get_logger().info(f"looking at ({target[0]:.1f}, {target[1]:.1f}), "
+                                 f"{int(worth.sum()) * grid.resolution ** 2:.0f} m2 never in view")
+        # Whether it worked or no viewpoint was reachable, that gap has had its trip.
+        self.attempted.append(target)
+        look_at(flight, target, LOOK_HOVER)
+        self.look(flight)
+        return True
 
     def inspect(self, flight: Flight) -> None:
         """Look at unsure candidates, nearest first, until none is left worth a look."""

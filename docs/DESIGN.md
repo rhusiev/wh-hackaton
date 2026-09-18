@@ -155,7 +155,10 @@ This is the part the idea actually needs, and it is four pieces:
      the 2D map is a slice at flight height, so it shows a clear line over a
      shelf or a hedge that really blocks the view, and people standing still
      behind one were being marked lost. The map is only the fallback, for frames
-     with no depth yet.
+     with no depth yet. A miss also counts only once the track has gone 2 s
+     unseen (`GRACE`): the detector finds a person 7 m away every other frame
+     rather than every frame, and at 0.5 up against 0.35 down a track that is
+     really there would otherwise bleed away while the drone stares at it.
    - A track has one of three statuses. A candidate is not sure yet. Past 2.0,
      with at least 6 sightings, it is confirmed and sent as a target. A candidate
      is deleted at -2.0.
@@ -203,12 +206,32 @@ Fly with:
 ```
 
 Frontier exploration (`scripts/frontier.py`) works like this. A frontier is a
-known free cell next to an unknown one. The planner keeps 0.8 m from obstacles,
+known free cell next to an unknown one. The planner keeps 1.0 m from obstacles,
 finds the nearest reachable group of frontier cells by breadth-first search, and
 flies there in legs of at most 3 m, facing the direction of travel. The scan only
 covers what the camera faces. At each frontier it turns toward the unknown
-space. A frontier it has visited or failed to reach is skipped within 1.5 m. It
-stops when no frontier is left or after `--max-time` (600 s).
+space. A frontier it has visited, failed to reach, or spent 12 legs aiming at
+without arriving is skipped within 1.5 m - ground outside a building is mapped
+through gaps in its walls, and those cells look free and reachable.
+
+The 1.0 m is kept as a distance to the nearest occupied cell. The drone may end
+a leg inside that margin, so it is allowed to cross cells there to get out, but
+only ones no closer to anything than the cell it is already in. That is a way
+out, not a place to aim at: watch stations are only ever put where the full 1.0 m
+holds.
+
+Running out of frontiers is not the end, and neither is the map growing, because
+a complete map is not a searched place: the laser slice maps a warehouse from a handful of positions in
+about a minute, and a run that stopped there found 2 of 6 people. So the
+explorer also keeps a second grid, `scripts/coverage.py`, of what the camera has
+had in view - within 7 m, inside the field of view, and unobstructed, remembered
+in half-metre world cells so no map resolution or origin is assumed. When the
+frontiers run out it flies to the gap in that grid worth most, meaning the one
+with the most never-viewed area around it per metre flown, looks at it for 2 s
+and marks what it saw. It switches to this as soon as chasing frontiers stops
+paying - either none is left, or the map has not grown by 100 cells in 60 s -
+and switches back if a look reveals new ground. It stops when nothing mapped and
+reachable is left unlooked at, or after `--max-time` (600 s).
 
 Between legs it takes a closer look at candidates below 0.9 confidence, nearest
 first, at most twice each (`--no-inspect` turns this off). It picks a spot 5 m
@@ -246,7 +269,9 @@ clear line of sight on the map. It flies the stations in a loop and hovers 5 s
    If they are gone, the tracker marks them lost
 2. A lost person is looked for where they were last seen, from up to three
    sides at least 1 rad apart, then with four quarter-turns there. One side may
-   be the one a hedge or a rack hides them from
+   be the one a hedge or a rack hides them from. Anyone confirmed within 2 m of
+   where they were counts as them, whatever their id: a person whose track died
+   and started over comes back under a new one
 3. Whenever the confirmed people change or one moves more than 1 m, the
    stations are planned again. A station it could not reach is left out
 

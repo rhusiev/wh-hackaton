@@ -28,7 +28,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 import frontier
-from frontier import CLEARANCE, FrontierExplorer, distances, passable_cells
+from coverage import HALF_FOV
+from frontier import CLEARANCE, FrontierExplorer, clear_cells, distances, passable_cells
 from occupancy import Grid
 
 if TYPE_CHECKING:
@@ -36,10 +37,10 @@ if TYPE_CHECKING:
 
 WATCH_RANGE = 7.0        # inside the tracker's 8 m miss range, so a person leaving is noticed
 MIN_RANGE = 1.5
-HALF_FOV = 0.5           # rad, the camera's 0.6 with a margin for heading error
 SPOT_STEP = 1.0          # m between the spots considered
 MOVED = 1.0              # m a person may shift before the stations are planned again
 LOOKS = 3                # sides a lost person is looked for from
+NEAR = 2.0               # m from where they were, within which a confirmed person is them
 
 
 @dataclass
@@ -54,8 +55,11 @@ def stations(grid: Grid, start: tuple[float, float], people: list[tuple[int, flo
     """Few stations that together see every person, in flying order, and who no station sees."""
     start_cell = grid.cell(*start)
     steps, _ = distances(passable_cells(grid, start_cell, clearance), start_cell)
+    # Reachable and clear on its own: a cell only passable through the escape out of the
+    # drone's current tight spot is not there to be flown to once the drone has moved on.
+    reachable = (steps >= 0) & clear_cells(grid, clearance)
     stride = max(1, round(SPOT_STEP / grid.resolution))
-    spots = [grid.point(r, c) for r, c in zip(*np.nonzero(steps >= 0)) if r % stride == c % stride == 0]
+    spots = [grid.point(r, c) for r, c in zip(*np.nonzero(reachable)) if r % stride == c % stride == 0]
     spots = [spot for spot in spots if all(math.dist(spot, a) > SPOT_STEP for a in avoid)]
 
     # Every spot and heading, with who it sees: a heading centred on each visible person.
@@ -109,6 +113,7 @@ class Watch:
         log = flight.get_logger()
         deadline = flight.get_clock().now().nanoseconds + int(self.watch_time * 1e9)
         while flight.get_clock().now().nanoseconds < deadline:
+            self.explorer.look(flight)
             watched = self.confirmed(flight)
             self.searched -= {p.id for p in watched}  # found again, so lost again is new
             if not watched:
@@ -160,7 +165,10 @@ class Watch:
         log.info(f"person {person.id} lost at ({person.x:.1f}, {person.y:.1f}) {person.age:.0f} s ago")
 
         def found() -> bool:
-            return any(p.id == person.id and p.status == "confirmed" and p.age < self.dwell
+            # Their own id if the tracker kept it, otherwise whoever is confirmed there now:
+            # a person whose track died and started over comes back under a new id.
+            return any(p.status == "confirmed" and p.age < self.dwell
+                       and (p.id == person.id or math.dist((p.x, p.y), (person.x, person.y)) < NEAR)
                        for p in flight.people())
 
         # One side may be the one a hedge or a rack hides them from, so try others.

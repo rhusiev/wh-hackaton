@@ -10,6 +10,8 @@ import numpy as np
 UNKNOWN = -1
 OCCUPIED = 50
 
+type Index = int | np.ndarray        # one cell, or a whole array of them at once
+
 
 @dataclass
 class Grid:
@@ -27,7 +29,8 @@ class Grid:
         return (int((y - self.origin[1]) / self.resolution),
                 int((x - self.origin[0]) / self.resolution))
 
-    def point(self, row: int, col: int) -> tuple[float, float]:
+    def point(self, row: Index, col: Index) -> tuple[Index, Index]:
+        """The middle of a cell, or of every cell of a pair of index arrays."""
         return (self.origin[0] + (col + 0.5) * self.resolution,
                 self.origin[1] + (row + 0.5) * self.resolution)
 
