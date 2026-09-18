@@ -265,10 +265,13 @@ def compose(frame: dict, viewer: Viewer, scene: np.ndarray | None = None,
     return np.hstack([pad(left), pad(right)])
 
 
-# GTK reports the arrows in the 65361-65364 block and the other backends in
-# 81-84, so both are mapped onto the letters that do the same thing everywhere.
+# Every backend numbers the arrows differently: GTK 65361-65364, Qt and Windows
+# the 2424832 block, the rest 81-84. All three are mapped onto the letters that
+# do the same thing everywhere. Reading them at all needs waitKeyEx, because
+# waitKey keeps only the low byte and 65361 would come back as q.
 ARROWS = {65361: "j", 65362: "i", 65363: "l", 65364: "k",
-          81: "j", 82: "i", 83: "l", 84: "k"}
+          81: "j", 82: "i", 83: "l", 84: "k",
+          2424832: "j", 2490368: "i", 2555904: "l", 2621440: "k"}
 
 
 def walk(viewer: Viewer, key: int) -> Viewer:
@@ -370,7 +373,7 @@ async def show(url: str, viewer: Viewer, save: str | None,
             pose, eye = eyes(frame, viewer)
             cv2.imshow(WINDOWS[0], wallhack(frame, pose, background(frame), eye))
             cv2.imshow(WINDOWS[1], minimap(frame, viewer))
-            key = cv2.waitKey(1)
+            key = cv2.waitKeyEx(1)
             if key in (ord("q"), 27):
                 return
             viewer = walk(viewer, key)
