@@ -32,8 +32,10 @@ services:
     devices:
       - ${CAMERA:-/dev/null}:/dev/video0
 
+    # By number, not by name: the host's video group is gid 39 on Fedora and the
+    # container calls that gid irc. run.sh reads it off the device itself.
     group_add:
-      - video
+      - "${VIDEO_GID:-44}"
 
     volumes:
       - .:/workspace/wh-hackaton

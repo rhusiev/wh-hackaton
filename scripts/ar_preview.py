@@ -294,8 +294,12 @@ def open_camera(source: str | None) -> cv2.VideoCapture | None:
         return None
     capture = cv2.VideoCapture(int(source) if source.isdigit() else source)
     if not capture.isOpened():
-        raise SystemExit(f"cannot open camera {source}; in the container it needs "
-                         "CAMERA=/dev/videoN ./run.sh up")
+        # Not every /dev/videoN captures: a machine's first node is often a virtual
+        # camera or the metadata half of a real one, and neither yields a frame.
+        raise SystemExit(
+            f"cannot open camera {source}. In the container it is whatever "
+            "CAMERA=/dev/videoN ./run.sh up passed in; check on the host which node "
+            "captures with: v4l2-ctl --list-devices")
     return capture
 
 

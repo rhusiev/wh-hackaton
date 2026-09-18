@@ -53,6 +53,8 @@ case "${cmd}" in
     build) docker compose build "$@" ;;
     push)  docker compose push "$@" ;;
     up)    xhost +local:docker >/dev/null 2>&1 || true
+           # Whoever owns the camera on this host, so the container's ubuntu can read it.
+           [ -e "${CAMERA:-}" ] && export VIDEO_GID=$(stat -c %g "${CAMERA}")
            docker compose up -d "$@" ;;
     down)  docker compose down "$@" ;;
     sim)   sweep_shm

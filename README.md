@@ -76,7 +76,7 @@ Stop with Ctrl+C in terminal 1, and `./run.sh down` to remove the container
 ./run.sh explore --lanes 2                  # shorter demo flight
 ./run.sh demo --save frame.png              # one frame to a file, no window needed
 ./run.sh preview --viewer -15 0 0           # glasses view from x, y, yaw; WASD walks and turns
-CAMERA=/dev/video0 ./run.sh up              # pass a camera in, then:
+CAMERA=/dev/video1 ./run.sh up              # pass a camera in (not every node captures), then:
 ./run.sh preview --camera 0                 # the overlay on a real camera instead of the wireframe
 ./run.sh preview --camera 0 --hfov 78       # match the camera's real field of view
 ./run.sh shell                              # a shell inside the container
