@@ -14,6 +14,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch_ros.descriptions import ParameterValue
 from launch_ros.actions import Node
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -34,9 +35,13 @@ def _script(name: str, *args) -> list:
 
 def generate_launch_description() -> LaunchDescription:
     slam = LaunchConfiguration("slam")
+    sim_time = ParameterValue(LaunchConfiguration("sim_time"), value_type=bool)
 
     args = [
         DeclareLaunchArgument("slam", default_value="false", choices=["true", "false"]),
+        # False on the aircraft, where the clock is the machine's own. Only the nodes
+        # that look up a transform need it; the rest read message stamps.
+        DeclareLaunchArgument("sim_time", default_value="true", choices=["true", "false"]),
         DeclareLaunchArgument("ar_port", default_value="8790"),
         # yolo runs the real network on the colour image, truth reads the true
         # positions of the people and is nearly free.
@@ -57,7 +62,7 @@ def generate_launch_description() -> LaunchDescription:
         output="screen",
         remappings=[("cloud_in", "/camera/depth/points"), ("scan", "/scan")],
         parameters=[{
-            "use_sim_time": True,
+            "use_sim_time": sim_time,
             "target_frame": "base_link",
             "transform_tolerance": 0.05,
             # From 2.8 m this still takes in the top of the 2.45 m shelf deck.
@@ -100,7 +105,7 @@ def generate_launch_description() -> LaunchDescription:
     # Visual odometry and the 2D grid the AR minimap is drawn from. Decimation
     # and the feature cap are the Pi 5 budget, not a quality choice.
     common = {
-        "use_sim_time": True,
+        "use_sim_time": sim_time,
         "frame_id": "base_link",
         "odom_frame_id": "vodom",
         "approx_sync": True,

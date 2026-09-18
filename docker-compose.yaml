@@ -27,6 +27,14 @@ services:
       - __NV_PRIME_RENDER_OFFLOAD=1
       - FASTRTPS_DEFAULT_PROFILES_FILE=/workspace/wh-hackaton/config/fastdds.xml
 
+    # The AR preview's --camera. Defaulting to /dev/null keeps the container
+    # startable on a machine with no camera, where opening it simply fails.
+    devices:
+      - ${CAMERA:-/dev/null}:/dev/video0
+
+    group_add:
+      - video
+
     volumes:
       - .:/workspace/wh-hackaton
       - /tmp/.X11-unix:/tmp/.X11-unix:rw

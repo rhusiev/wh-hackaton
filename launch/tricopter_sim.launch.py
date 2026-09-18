@@ -1,5 +1,9 @@
 """Gazebo + ArduPilot SITL bringup for the tricopter, in world:=warehouse or world:=garden.
 
+Everything here is simulation. The camera geometry and the perception stack it
+starts are shared with the aircraft, in camera.launch.py and perception.launch.py,
+which tricopter.launch.py includes instead.
+
 ArduPilot SITL itself is normally started separately with scripts/run_sitl.sh so
 that the MAVProxy console keeps a usable stdin; pass sitl:=true for a headless
 one-command bringup.
@@ -26,15 +30,10 @@ from launch.substitutions import (
     PathJoinSubstitution,
     PythonExpression,
 )
-from launch_ros.actions import ComposableNodeContainer, Node
-from launch_ros.descriptions import ComposableNode, ParameterValue
+from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
 ROOT = Path(__file__).resolve().parent.parent
-
-# Must match camera_link in models/tricopter/model.sdf.
-CAMERA_XYZ = ("0.135", "0", "-0.01")
-CAMERA_PITCH = "0.2618"
 
 
 def _prepend(var: str, value: str) -> SetEnvironmentVariable:
@@ -111,73 +110,11 @@ def generate_launch_description() -> LaunchDescription:
     depth_noise = ExecuteProcess(
         cmd=["python3", str(ROOT / "scripts" / "depth_noise.py")], output="screen")
 
-    # Gazebo's own /rgbd/points is X-forward while being tagged with the optical
-    # frame, so the usable cloud is rebuilt here from the depth image instead.
-    # The default 4x decimation keeps 160 columns, still finer than the scan's 139
-    # bins, and cuts the cloud and the scan slicer's work 16x.
-    decimation = ParameterValue(LaunchConfiguration("depth_decimation"), value_type=int)
-    depth_to_cloud = ComposableNodeContainer(
-        name="depth_proc",
-        namespace="",
-        package="rclcpp_components",
-        executable="component_container",
-        output="screen",
-        composable_node_descriptions=[
-            ComposableNode(
-                package="image_proc",
-                plugin="image_proc::CropDecimateNode",
-                name="depth_decimate",
-                parameters=[{
-                    "use_sim_time": True,
-                    "decimation_x": decimation,
-                    "decimation_y": decimation,
-                    "interpolation": 0,  # nearest, depth must not be blended
-                }],
-                remappings=[
-                    ("in/image_raw", "/camera/depth/image_raw"),
-                    ("in/camera_info", "/camera/depth/camera_info"),
-                    ("out/image_raw", "/camera/depth/decimated/image_raw"),
-                    ("out/camera_info", "/camera/depth/decimated/camera_info"),
-                ],
-                extra_arguments=[{"use_intra_process_comms": True}],
-            ),
-            ComposableNode(
-                package="depth_image_proc",
-                plugin="depth_image_proc::PointCloudXyzNode",
-                name="point_cloud_xyz",
-                parameters=[{"use_sim_time": True}],
-                remappings=[
-                    ("image_rect", "/camera/depth/decimated/image_raw"),
-                    ("camera_info", "/camera/depth/decimated/camera_info"),
-                    ("points", "/camera/depth/points"),
-                ],
-                extra_arguments=[{"use_intra_process_comms": True}],
-            ),
-        ],
+    camera = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(str(ROOT / "launch" / "camera.launch.py")),
+        launch_arguments=[("depth_decimation", LaunchConfiguration("depth_decimation")),
+                          ("sim_time", "true")],
     )
-
-    static_tf = [
-        Node(
-            package="tf2_ros",
-            executable="static_transform_publisher",
-            name="tf_base_to_camera",
-            arguments=[
-                "--x", CAMERA_XYZ[0], "--y", CAMERA_XYZ[1], "--z", CAMERA_XYZ[2],
-                "--roll", "0", "--pitch", CAMERA_PITCH, "--yaw", "0",
-                "--frame-id", "base_link", "--child-frame-id", "camera_link",
-            ],
-        ),
-        Node(
-            package="tf2_ros",
-            executable="static_transform_publisher",
-            name="tf_camera_to_optical",
-            arguments=[
-                "--x", "0", "--y", "0", "--z", "0",
-                "--roll", "-1.5708", "--pitch", "0", "--yaw", "-1.5708",
-                "--frame-id", "camera_link", "--child-frame-id", "camera_optical_frame",
-            ],
-        ),
-    ]
 
     sitl = ExecuteProcess(
         cmd=[str(ROOT / "scripts" / "run_sitl.sh")],
@@ -212,6 +149,7 @@ def generate_launch_description() -> LaunchDescription:
             ("ar", LaunchConfiguration("ar")),
             ("ar_port", LaunchConfiguration("ar_port")),
             ("world", LaunchConfiguration("world")),
+            ("sim_time", "true"),
         ],
         condition=IfCondition(LaunchConfiguration("perception")),
     )
@@ -241,9 +179,7 @@ def generate_launch_description() -> LaunchDescription:
     ld.add_action(bridge)
     ld.add_action(image_bridge)
     ld.add_action(depth_noise)
-    ld.add_action(depth_to_cloud)
-    for node in static_tf:
-        ld.add_action(node)
+    ld.add_action(camera)
     ld.add_action(TimerAction(period=9.0, actions=[sitl]))
     ld.add_action(TimerAction(period=11.0, actions=[mavros]))
     ld.add_action(TimerAction(period=12.0, actions=[perception]))

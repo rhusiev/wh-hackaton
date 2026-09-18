@@ -305,6 +305,36 @@ To move this to the real aircraft, run with `detector:=none` and start
 `depthai_ros_driver` instead. It publishes the same `Detection3DArray`, so
 `ar_bridge.py` and the Lens do not change.
 
+## What is simulation, and what is not
+
+The launch files are split along that line, so nothing simulated has to be
+deleted to fly:
+
+| File | Runs | On hardware |
+|---|---|---|
+| `launch/tricopter_sim.launch.py` | Gazebo, the gz bridges, `depth_noise.py`, SITL | not used |
+| `launch/camera.launch.py` | where the camera sits on the airframe, depth -> cloud | unchanged |
+| `launch/perception.launch.py` | scan, mapper, detector, tracker, AR server | unchanged, with `sim_time:=false` |
+| `launch/tricopter.launch.py` | the last two, MAVROS on a serial link, the OAK-D driver | this is the one you start |
+
+Three things differ, and only three. The clock: every node that looks up a
+transform takes `use_sim_time` from the `sim_time` argument, true under Gazebo
+which publishes `/clock`, false on the aircraft whose clock is its own. The
+camera: the sim's `ros_gz_image` bridge and a real OAK-D both publish
+`/camera/color/image_raw` and `/camera/depth/image_raw`, so everything
+downstream is the same code. The link to the flight controller: `fcu_url` is a
+UDP port for SITL and `/dev/ttyAMA0:921600` for the Pi.
+
+`launch/tricopter.launch.py` has not been flown. Two things in it are written
+from the documentation rather than from a device: `config/oak.yaml`, and whether
+the depthai driver's topics need remapping onto the names above.
+
+These tools read the world's SDF or the ground-truth odometry the gz bridge
+publishes, so they are simulation-only and have no meaning on the aircraft:
+`smoke_test.py`, `clearance.py`, `score_search.py`, `walk_person.py`,
+`spatial_detector.py` (`detector:=truth`), `depth_noise.py`, `worldgen.py` and
+the `gen_*.py` scripts.
+
 ## Swapping a part
 
 Every part talks to the next only through topics or a small Python interface, so

@@ -1,0 +1,18 @@
+# The OAK-D settings the perception stack assumes, matched to the sim's rgbd
+# sensor in models/tricopter/model.sdf: 640x400 depth and colour at 15 Hz.
+# Untested on the device - nothing here has flown yet.
+/oak:
+  ros__parameters:
+    camera:
+      i_pipeline_type: RGBD
+      i_enable_imu: true
+    rgb:
+      i_resolution: "720P"
+      i_fps: 15.0
+      i_publish_topic: true
+    stereo:
+      i_width: 640
+      i_height: 400
+      i_fps: 15.0
+      i_subpixel: true
+      i_publish_topic: true
