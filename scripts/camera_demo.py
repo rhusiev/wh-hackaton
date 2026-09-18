@@ -24,6 +24,7 @@ from stereo import DEPTH_MAX, DEPTH_MIN
 # The detector runs slower than the camera, so its boxes are drawn on later frames too.
 DETECTION_MAX_AGE = 0.5
 BOX_COLOURS = {"person": (0, 0, 255), "head": (0, 255, 255)}
+WINDOW = "OAK-D colour | depth"
 
 
 def colourize(depth: np.ndarray) -> np.ndarray:
@@ -48,6 +49,10 @@ class CameraDemo(Node):
         self.detections = Detection2DArray()
         self.create_subscription(Detection2DArray, "/oak/detections_2d",
                                  lambda msg: setattr(self, "detections", msg), 10)
+        if not save:
+            # WINDOW_NORMAL lets the window be dragged to any size and scales the frame
+            # into it; KEEPRATIO stops that scaling from stretching the pair.
+            cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
 
     def on_frames(self, colour: Image, depth: Image) -> None:
         left = self.bridge.imgmsg_to_cv2(colour, "bgr8")
@@ -62,7 +67,7 @@ class CameraDemo(Node):
             cv2.imwrite(self.save, frame)
             self.get_logger().info(f"wrote {self.save}")
             raise SystemExit
-        cv2.imshow("OAK-D colour | depth", frame)
+        cv2.imshow(WINDOW, frame)
         if cv2.waitKey(1) in (ord("q"), 27):
             raise SystemExit
 
