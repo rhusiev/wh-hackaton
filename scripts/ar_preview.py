@@ -5,7 +5,9 @@ Left is the minimap: the grid, the drone and every tracked person with their hea
 A person no longer where they were last seen is drawn pale, with how long ago.
 Right is the wallhack view of the wearer, who starts at --viewer and can be walked
 around: each person's box and head box projected into their sight, through walls,
-with the distance.
+with the distance. The room is drawn as a wireframe traced from the same grid,
+standing in for what the wearer's own eyes would supply - real glasses are
+see-through and would send only the overlay.
 
     ./run.sh preview                          # live window
     ./run.sh preview --save ar.png            # one frame to a file
@@ -32,9 +34,15 @@ VIEW_W, VIEW_H, VIEW_HFOV = 640, 400, math.radians(60)
 EYE_HEIGHT = 1.7
 STEP = 0.5                  # m per keypress, about a stride
 TURN = math.radians(10)
+NEAR = 0.3                  # m, nothing closer than this can be projected
+WALL_H = 3.0                # m, how tall to draw a mapped obstacle: the grid is a
+                            # 2.3 m slice and has no heights in it
+WALL_SIMPLIFY = 1.5         # cells of detour a wireframe corner may cut
 GRID_COLOURS = np.array([[235, 235, 235], [40, 40, 40], [150, 150, 150]], dtype=np.uint8)
+OCCUPIED = 1                # the index into GRID_COLOURS the mapper marks obstacles with
 PERSON, HEAD, DRONE, WEARER = (0, 90, 255), (0, 220, 255), (200, 80, 0), (60, 160, 60)
 LOST = (140, 140, 200)
+WALL = (90, 90, 90)
 
 
 def colour(target: dict) -> tuple[int, int, int]:
@@ -76,6 +84,24 @@ def minimap(frame: dict, viewer: tuple[float, float, float]) -> np.ndarray:
     return image
 
 
+def outlines(grid: dict) -> list[np.ndarray]:
+    """The mapped obstacles as closed polygons in map coordinates.
+
+    The grid is a top-down picture, so the edge of an occupied region is exactly
+    where a wall face is. Tracing it costs far fewer lines than drawing a box per
+    cell, and simplifying it keeps a straight wall one straight line.
+    """
+    cells = np.frombuffer(base64.b64decode(grid["cells"]), np.uint8).reshape(grid["h"], grid["w"])
+    found, _ = cv2.findContours((cells == OCCUPIED).astype(np.uint8),
+                                cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    polygons = []
+    for contour in found:
+        corners = cv2.approxPolyDP(contour, WALL_SIMPLIFY, True).reshape(-1, 2)
+        if len(corners) >= 2:
+            polygons.append((corners + 0.5) * grid["res"] + [grid["x0"], grid["y0"]])
+    return polygons
+
+
 def wallhack(frame: dict, viewer: tuple[float, float, float]) -> np.ndarray:
     image = np.full((VIEW_H, VIEW_W, 3), 30, np.uint8)
     vx, vy, yaw = viewer
@@ -85,7 +111,7 @@ def wallhack(frame: dict, viewer: tuple[float, float, float]) -> np.ndarray:
     def project(x: float, y: float, z: float) -> tuple[float, float, float] | None:
         rel = np.array([x - vx, y - vy])
         depth = float(rel @ forward)
-        if depth < 0.3:
+        if depth < NEAR:
             return None
         return (VIEW_W / 2 - focal * float(rel @ left) / depth,
                 VIEW_H / 2 - focal * (z - EYE_HEIGHT) / depth, depth)
@@ -100,6 +126,32 @@ def wallhack(frame: dict, viewer: tuple[float, float, float]) -> np.ndarray:
         cv2.rectangle(image, (int(u - half_w), int(v - half_h)), (int(u + half_w), int(v + half_h)),
                       colour, 2)
         return depth
+
+    def edge(a: np.ndarray, b: np.ndarray, za: float, zb: float) -> None:
+        """A line between two map points, cut where it would pass behind the wearer.
+
+        Depth comes from x and y alone, so the crossing is found in the plan and the
+        height is carried along it.
+        """
+        da, db = float((a - (vx, vy)) @ forward), float((b - (vx, vy)) @ forward)
+        if da < NEAR and db < NEAR:
+            return
+        if min(da, db) < NEAR:
+            t = (NEAR - da) / (db - da)
+            if da < NEAR:
+                a, za = a + t * (b - a), za + t * (zb - za)
+            else:
+                b, zb = a + t * (b - a), za + t * (zb - za)
+        start, end = project(*a, za), project(*b, zb)
+        if start and end:
+            cv2.line(image, (int(start[0]), int(start[1])), (int(end[0]), int(end[1])), WALL, 1)
+
+    if frame.get("map"):
+        for polygon in outlines(frame["map"]):
+            for a, b in zip(polygon, np.roll(polygon, -1, axis=0)):
+                edge(a, b, 0.0, 0.0)
+                edge(a, b, WALL_H, WALL_H)
+                edge(a, a, 0.0, WALL_H)
 
     labels: list[tuple[int, int, int, int]] = []
     for target in sorted(frame["targets"], key=lambda t: -math.dist((t["x"], t["y"]), (vx, vy))):

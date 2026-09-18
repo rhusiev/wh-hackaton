@@ -197,7 +197,10 @@ This is the part the idea actually needs, and it is four pieces:
 
    Metres in the map frame, so the Lens only has to scale and rotate. `"head"`
    is missing when no head was seen. `./run.sh preview` draws this payload the
-   way the glasses would, with lost people pale.
+   way the glasses would, with lost people pale. It also traces the occupied
+   cells into a wireframe of the room, which real glasses would not send - the
+   wearer sees that through the optics, and on a monitor there is nothing behind
+   the overlay without it. WASD walks the wearer around.
 
 Fly with:
 
