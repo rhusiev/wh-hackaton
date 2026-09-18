@@ -1,30 +1,31 @@
 #!/usr/bin/env python3
 """Draw what the AR glasses would show, from nothing but the AR WebSocket feed.
 
-Left is the minimap: the grid, the drone and every tracked person with their head.
-A person no longer where they were last seen is drawn pale, with how long ago.
-Right is the wallhack view of the wearer, who starts at --viewer and can be walked
-around: each person's box and head box projected into their sight, through walls,
-with the distance. The room is drawn as a wireframe traced from the same grid,
-standing in for what the wearer's own eyes would supply - real glasses are
-see-through and would send only the overlay.
-
---camera puts a real camera image there instead, which is what the glasses will
-see through. The overlay is still placed from --viewer, not from where the camera
-actually is, so the two only agree if the camera is held at that pose; tracking
-the camera is what would close that gap.
+One window: what the wearer sees, with the minimap inset in its corner. Each
+tracked person gets a box and a head box projected into their sight, through
+walls, with the distance; a person no longer where they were last seen is drawn
+pale, with how long ago. Behind the overlay is either a real camera image
+(--camera) or a wireframe of the room traced from the mapped grid, which stands
+in for what see-through glasses would let the eye supply by itself.
 
     ./run.sh preview                          # live window
+    ./run.sh preview --camera 0               # overlay on a real camera
     ./run.sh preview --save ar.png            # one frame to a file
     ./run.sh preview --viewer -15 0 0         # x, y and yaw the wearer starts at
-    ./run.sh preview --camera 0               # overlay on a real camera
 
-The two are separate windows, each resizable on its own and scaling its contents
-to fit. --save has no windows to split, so it writes them side by side.
+The window is resizable and scales its contents to fit.
 
-W and S walk, A and D turn, q or Escape quits. The keys are read between frames
-of the feed, so holding one moves at the feed's rate rather than the keyboard's,
-and they reach either window - whichever has focus.
+    W S     walk forward and back        arrows or I J K L    look around
+    A D     step left and right          q or Escape          quit
+
+Looking left and right turns the wearer; looking up and down pitches the view
+without leaving the floor, the way a head does.
+
+The camera and the feed run at different rates, so they are read separately: the
+newest payload is kept by a background task and drawn onto whatever camera frame
+is current. The picture therefore never waits for the feed, and the boxes are
+always the most recent ones rather than a frame-matched pair - matching them
+would need a timestamp the camera does not share with the drone.
 """
 
 from __future__ import annotations
@@ -44,6 +45,7 @@ VIEW_W, VIEW_H, VIEW_HFOV = 640, 400, math.radians(60)
 EYE_HEIGHT = 1.7
 STEP = 0.5                  # m per keypress, about a stride
 TURN = math.radians(10)
+PITCH_LIMIT = math.radians(80)  # past this the horizon is behind you and the view tumbles
 NEAR = 0.3                  # m, nothing closer than this can be projected
 WALL_H = 3.0                # m, how tall to draw a mapped obstacle: the grid is a
                             # 2.3 m slice and has no heights in it
@@ -55,14 +57,20 @@ LOST = (140, 140, 200)
 WALL, FLOOR, HORIZON = (90, 90, 90), (55, 55, 55), (45, 45, 45)
 FLOOR_STEP, FLOOR_EXTENT = 2.0, 24.0    # m between floor lines, and how far they run
 FADE_FULL, FADE_MIN = 30.0, 0.3         # a line is dimmest this far off, but never darker
-WINDOWS = ("AR view", "minimap")
+WINDOW = "AR glasses"
+INSET_W = 220               # px wide the minimap is drawn in the corner
+INSET_MARGIN = 10
+DRAW_RATE = 30.0            # Hz the window is redrawn at when there is no camera to pace it
+
+# Where the wearer is and where they are looking: x, y, yaw, pitch.
+Viewer = tuple[float, float, float, float]
 
 
 def colour(target: dict) -> tuple[int, int, int]:
     return LOST if target["status"] == "lost" else PERSON
 
 
-def minimap(frame: dict, viewer: tuple[float, float, float]) -> np.ndarray:
+def minimap(frame: dict, viewer: Viewer) -> np.ndarray:
     grid = frame.get("map")
     if grid is None:
         image = np.full((VIEW_H, VIEW_H), 150, np.uint8)
@@ -87,7 +95,7 @@ def minimap(frame: dict, viewer: tuple[float, float, float]) -> np.ndarray:
     if frame.get("drone"):
         d = frame["drone"]
         arrow(d["x"], d["y"], d["yaw"], DRONE)
-    arrow(*viewer, WEARER)
+    arrow(viewer[0], viewer[1], viewer[2], WEARER)
     for target in frame["targets"]:
         cv2.circle(image, px(target["x"], target["y"]), 5, colour(target), -1)
         cv2.putText(image, str(target["id"]), px(target["x"] + 0.3, target["y"] + 0.3),
@@ -115,8 +123,7 @@ def outlines(grid: dict) -> list[np.ndarray]:
     return polygons
 
 
-def wallhack(frame: dict, viewer: tuple[float, float, float],
-             scene: np.ndarray | None = None) -> np.ndarray:
+def wallhack(frame: dict, viewer: Viewer, scene: np.ndarray | None = None) -> np.ndarray:
     """The overlay, over a real camera image if one is given and a wireframe if not.
 
     With a camera the room is already in the picture, so the floor, horizon and
@@ -125,17 +132,25 @@ def wallhack(frame: dict, viewer: tuple[float, float, float],
     """
     image = cv2.resize(scene, (VIEW_W, VIEW_H)) if scene is not None \
         else np.full((VIEW_H, VIEW_W, 3), 30, np.uint8)
-    vx, vy, yaw = viewer
+    vx, vy, yaw, pitch = viewer
+    eye = np.array([vx, vy, EYE_HEIGHT])
     focal = VIEW_W / 2 / math.tan(VIEW_HFOV / 2)
-    forward, left = np.array([math.cos(yaw), math.sin(yaw)]), np.array([-math.sin(yaw), math.cos(yaw)])
+    # The three axes of the head: where it looks, its left, and its up. Pitch tilts
+    # the first and the third and leaves left alone, which is what stops a look
+    # upwards from rolling the horizon.
+    forward = np.array([math.cos(pitch) * math.cos(yaw), math.cos(pitch) * math.sin(yaw),
+                        math.sin(pitch)])
+    left = np.array([-math.sin(yaw), math.cos(yaw), 0.0])
+    up = np.array([-math.sin(pitch) * math.cos(yaw), -math.sin(pitch) * math.sin(yaw),
+                   math.cos(pitch)])
 
     def project(x: float, y: float, z: float) -> tuple[float, float, float] | None:
-        rel = np.array([x - vx, y - vy])
+        rel = np.array([x, y, z]) - eye
         depth = float(rel @ forward)
         if depth < NEAR:
             return None
         return (VIEW_W / 2 - focal * float(rel @ left) / depth,
-                VIEW_H / 2 - focal * (z - EYE_HEIGHT) / depth, depth)
+                VIEW_H / 2 - focal * float(rel @ up) / depth, depth)
 
     def box(x: float, y: float, z: float, width: float, height: float, colour) -> float | None:
         """A screen-facing rectangle centred on x, y, z; returns its distance if drawn."""
@@ -155,7 +170,8 @@ def wallhack(frame: dict, viewer: tuple[float, float, float],
         height is carried along it. The line dims with distance, which is the only
         depth cue a wireframe has.
         """
-        da, db = float((a - (vx, vy)) @ forward), float((b - (vx, vy)) @ forward)
+        pa, pb = np.array([*a, za]), np.array([*b, zb])
+        da, db = float((pa - eye) @ forward), float((pb - eye) @ forward)
         if da < NEAR and db < NEAR:
             return
         if min(da, db) < NEAR:
@@ -172,7 +188,10 @@ def wallhack(frame: dict, viewer: tuple[float, float, float],
                  tuple(c * shade for c in base), 1)
 
     if scene is None:
-        cv2.line(image, (0, VIEW_H // 2), (VIEW_W, VIEW_H // 2), HORIZON, 1)
+        # The horizon is where a ray at eye height ends up, which pitch moves.
+        horizon = int(VIEW_H / 2 + focal * math.tan(pitch))
+        if 0 <= horizon < VIEW_H:
+            cv2.line(image, (0, horizon), (VIEW_W, horizon), HORIZON, 1)
         # Lines on whole multiples of the step, so the floor stays put as the wearer walks.
         near_x, near_y = (math.floor(c / FLOOR_STEP) * FLOOR_STEP for c in (vx, vy))
         for offset in np.arange(-FLOOR_EXTENT, FLOOR_EXTENT + FLOOR_STEP, FLOOR_STEP):
@@ -221,28 +240,51 @@ def wallhack(frame: dict, viewer: tuple[float, float, float],
     return image
 
 
-def compose(frame: dict, viewer: tuple[float, float, float],
-            scene: np.ndarray | None = None) -> np.ndarray:
-    """The two panes side by side, for --save: a file cannot be two windows."""
-    left, right = minimap(frame, viewer), wallhack(frame, viewer, scene)
-    height = max(left.shape[0], right.shape[0])
-    pad = lambda img: cv2.copyMakeBorder(img, 0, height - img.shape[0], 0, 0,
-                                         cv2.BORDER_CONSTANT, value=(0, 0, 0))
-    return np.hstack([pad(left), pad(right)])
+def compose(frame: dict, viewer: Viewer, scene: np.ndarray | None = None) -> np.ndarray:
+    """The view with the minimap inset in its top right, which is the whole picture."""
+    image = wallhack(frame, viewer, scene)
+    plan = minimap(frame, viewer)
+    inset = cv2.resize(plan, (INSET_W, round(INSET_W * plan.shape[0] / plan.shape[1])))
+    h, w = inset.shape[:2]
+    if h + 2 * INSET_MARGIN > VIEW_H:            # a tall map would cover the view
+        inset = cv2.resize(inset, (round(w * (VIEW_H - 2 * INSET_MARGIN) / h),
+                                   VIEW_H - 2 * INSET_MARGIN))
+        h, w = inset.shape[:2]
+    x = VIEW_W - w - INSET_MARGIN
+    image[INSET_MARGIN:INSET_MARGIN + h, x:x + w] = inset
+    cv2.rectangle(image, (x - 1, INSET_MARGIN - 1), (x + w, INSET_MARGIN + h),
+                  (255, 255, 255), 1)
+    return image
 
 
-def walk(viewer: tuple[float, float, float], key: int) -> tuple[float, float, float]:
-    """W and S step along the way the wearer faces, A and D turn on the spot."""
-    x, y, yaw = viewer
-    match chr(key & 0xFF).lower():
+# GTK reports the arrows in the 65361-65364 block and the other backends in
+# 81-84, so both are mapped onto the letters that do the same thing everywhere.
+ARROWS = {65361: "j", 65362: "i", 65363: "l", 65364: "k",
+          81: "j", 82: "i", 83: "l", 84: "k"}
+
+
+def walk(viewer: Viewer, key: int) -> Viewer:
+    """WASD moves the wearer over the floor, IJKL and the arrows aim their head."""
+    x, y, yaw, pitch = viewer
+    forward = (math.cos(yaw), math.sin(yaw))
+    left = (-math.sin(yaw), math.cos(yaw))
+    match ARROWS.get(key, chr(key & 0xFF).lower()):
         case "w":
-            return x + STEP * math.cos(yaw), y + STEP * math.sin(yaw), yaw
+            return x + STEP * forward[0], y + STEP * forward[1], yaw, pitch
         case "s":
-            return x - STEP * math.cos(yaw), y - STEP * math.sin(yaw), yaw
+            return x - STEP * forward[0], y - STEP * forward[1], yaw, pitch
         case "a":
-            return x, y, yaw + TURN
+            return x + STEP * left[0], y + STEP * left[1], yaw, pitch
         case "d":
-            return x, y, yaw - TURN
+            return x - STEP * left[0], y - STEP * left[1], yaw, pitch
+        case "j":
+            return x, y, yaw + TURN, pitch
+        case "l":
+            return x, y, yaw - TURN, pitch
+        case "i":
+            return x, y, yaw, min(pitch + TURN, PITCH_LIMIT)
+        case "k":
+            return x, y, yaw, max(pitch - TURN, -PITCH_LIMIT)
     return viewer
 
 
@@ -257,31 +299,47 @@ def open_camera(source: str | None) -> cv2.VideoCapture | None:
     return capture
 
 
-async def show(url: str, viewer: tuple[float, float, float], save: str | None,
-               camera: cv2.VideoCapture | None) -> None:
-    if not save:
-        # WINDOW_NORMAL lets the window be dragged to any size and scales the frame
-        # into it; KEEPRATIO stops that scaling from stretching the view.
-        for name in WINDOWS:
-            cv2.namedWindow(name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
+async def feed(url: str, latest: dict) -> None:
+    """Keep the newest payload in latest["frame"], so drawing never waits on it."""
     async with websockets.connect(url) as socket:
         while True:
-            frame = json.loads(await socket.recv())
+            latest["frame"] = json.loads(await socket.recv())
+
+
+async def show(url: str, viewer: Viewer, save: str | None,
+               camera: cv2.VideoCapture | None) -> None:
+    latest: dict = {}
+    reader = asyncio.create_task(feed(url, latest))
+    try:
+        while "frame" not in latest:
+            await asyncio.sleep(0.01)
+            if reader.done():
+                await reader                     # the connection failed; report why
+        if save:
+            read, scene = camera.read() if camera else (False, None)
+            cv2.imwrite(save, compose(latest["frame"], viewer, scene if read else None))
+            print(f"wrote {save}")
+            return
+
+        # WINDOW_NORMAL lets the window be dragged to any size and scales the frame
+        # into it; KEEPRATIO stops that scaling from stretching the view.
+        cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
+        while True:
             scene = None
             if camera is not None:
                 read, scene = camera.read()
                 if not read:
                     scene = None
-            if save:
-                cv2.imwrite(save, compose(frame, viewer, scene))
-                print(f"wrote {save}")
-                return
-            cv2.imshow(WINDOWS[0], wallhack(frame, viewer, scene))
-            cv2.imshow(WINDOWS[1], minimap(frame, viewer))
+            cv2.imshow(WINDOW, compose(latest["frame"], viewer, scene))
             key = cv2.waitKey(1)
             if key in (ord("q"), 27):
                 return
             viewer = walk(viewer, key)
+            # A camera read blocks until its next frame and paces the loop by itself;
+            # without one, nothing would and the loop would spin on a core.
+            await asyncio.sleep(0 if camera is not None else 1.0 / DRAW_RATE)
+    finally:
+        reader.cancel()
 
 
 def main() -> None:
@@ -290,12 +348,16 @@ def main() -> None:
     parser.add_argument("--url", default="ws://localhost:8790")
     parser.add_argument("--viewer", type=float, nargs=3, default=(-15.5, 0.0, 0.0),
                         metavar=("X", "Y", "YAW"), help="where the wearer starts, map frame")
+    parser.add_argument("--hfov", type=float, help="camera's horizontal field of view, degrees")
     parser.add_argument("--save", help="write one frame to this path and exit")
     parser.add_argument("--camera", help="index or device of the camera to draw the overlay on")
     args = parser.parse_args()
+    if args.hfov:
+        global VIEW_HFOV
+        VIEW_HFOV = math.radians(args.hfov)
     camera = open_camera(args.camera)
     try:
-        asyncio.run(show(args.url, tuple(args.viewer), args.save, camera))
+        asyncio.run(show(args.url, (*args.viewer, 0.0), args.save, camera))
     except KeyboardInterrupt:
         pass
     finally:

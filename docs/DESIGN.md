@@ -200,8 +200,9 @@ This is the part the idea actually needs, and it is four pieces:
    way the glasses would, with lost people pale. It also traces the occupied
    cells into a wireframe of the room, which real glasses would not send - the
    wearer sees that through the optics, and on a monitor there is nothing behind
-   the overlay without it. WASD walks the wearer around, and the minimap and the
-   view are separate resizable windows.
+   the overlay without it. `--camera` puts a real camera image there instead. It
+   is one resizable window with the minimap inset in a corner; WASD walks the
+   wearer and the arrows or IJKL aim their head.
 
 Fly with:
 
