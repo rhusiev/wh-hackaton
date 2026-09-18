@@ -14,7 +14,8 @@ Payload, all lengths in metres in the map frame:
                   "head": {"x": -9.0, "y": 0.02, "z": 1.5, "size": 0.22},
                   "score": 0.78, "confidence": 0.95, "age": 1.3, "hits": 12}],
      "map": {"res": 0.2, "w": 200, "h": 200, "x0": -20.0, "y0": -20.0,
-             "cells": "<base64 of w*h bytes, 0 free / 1 occupied / 2 unknown>"}}
+             "cells": "<base64 of w*h bytes, 0 free / 1 occupied / 2 unknown>"},
+     "view": "<base64 JPEG of the drone's colour image, only with --video>"}
 
 A target is a box standing on the floor: centre x, y, z and height h. "head" is
 present once the detector has seen a head for it. "status" is "confirmed", or
@@ -35,6 +36,7 @@ import base64
 import json
 import threading
 
+import cv2
 import numpy as np
 import rclpy
 from nav_msgs.msg import OccupancyGrid
@@ -52,10 +54,13 @@ from tracker import Sighting, Tracker
 from view import CameraView
 
 MAP_PERIOD = 1.0
+# What the drone is looking at, for a preview that has no camera of its own. JPEG
+# because the payload is JSON and a raw 640x400 frame is 750 KB of base64 per send.
+VIEW_QUALITY = 60
 
 
 class ArBridge(Node):
-    def __init__(self) -> None:
+    def __init__(self, video: bool = False) -> None:
         super().__init__("ar_bridge")
         self.declare_parameters("", [
             ("map_frame", "map"),
@@ -81,6 +86,7 @@ class ArBridge(Node):
         self.grid: dict | None = None
         self.occupancy: Grid | None = None
         self.info: CameraInfo | None = None
+        self.view_jpeg: str | None = None
         self.depth: np.ndarray | None = None
         self.last_grid = 0.0
         self.last_tracks = 0.0
@@ -96,6 +102,9 @@ class ArBridge(Node):
                                  lambda msg: setattr(self, "info", msg), qos_profile_sensor_data)
         self.create_subscription(Image, "/camera/depth/image_raw", self.on_depth,
                                  qos_profile_sensor_data)
+        if video:
+            self.create_subscription(Image, "/camera/color/image_raw", self.on_colour,
+                                     qos_profile_sensor_data)
         self.tracks_out = self.create_publisher(String, "/people/tracks", 1)
 
     def _p(self, name: str):
@@ -150,6 +159,15 @@ class ArBridge(Node):
         return CameraView(rot, trans, (k[0], k[4], k[2], k[5]), (self.info.width, self.info.height),
                           self.occupancy, self.depth)
 
+    def on_colour(self, msg: Image) -> None:
+        """The drone's own view, encoded once here rather than per connected client."""
+        frame = np.frombuffer(msg.data, np.uint8).reshape(msg.height, msg.width, 3)
+        if msg.encoding == "rgb8":
+            frame = frame[:, :, ::-1]
+        ok, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, VIEW_QUALITY])
+        if ok:
+            self.view_jpeg = base64.b64encode(jpeg.tobytes()).decode()
+
     def on_depth(self, msg: Image) -> None:
         """The last depth frame, which says what is really in front of a track."""
         if msg.encoding == "32FC1":
@@ -191,6 +209,8 @@ class ArBridge(Node):
             payload["targets"] = [t for t in self.tracker.tracks(now) if t["status"] != "candidate"]
             if self.grid is not None:
                 payload["map"] = self.grid
+        if self.view_jpeg is not None:
+            payload["view"] = self.view_jpeg
         return json.dumps(payload, separators=(",", ":"))
 
 
@@ -220,10 +240,12 @@ def main() -> None:
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8790)
     parser.add_argument("--rate", type=float, default=10.0)
+    parser.add_argument("--video", action="store_true",
+                        help="also send the drone's colour image, for ./run.sh preview")
     known, ros_args = parser.parse_known_args()
 
     rclpy.init(args=ros_args)
-    node = ArBridge()
+    node = ArBridge(known.video)
     thread = threading.Thread(
         target=lambda: asyncio.run(serve(node, known.host, known.port, known.rate)),
         daemon=True)

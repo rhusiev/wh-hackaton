@@ -1,19 +1,27 @@
 #!/usr/bin/env python3
 """Draw what the AR glasses would show, from nothing but the AR WebSocket feed.
 
-One window: what the wearer sees, with the minimap inset in its corner. Each
-tracked person gets a box and a head box projected into their sight, through
-walls, with the distance; a person no longer where they were last seen is drawn
-pale, with how long ago. Behind the overlay is either a real camera image
-(--camera) or a wireframe of the room traced from the mapped grid, which stands
-in for what see-through glasses would let the eye supply by itself.
+Two windows, each resizable on its own and scaling its contents to fit. One is
+the wearer's view: every tracked person gets a box and a head box projected into
+their sight, through walls, with the distance, and a person no longer where they
+were last seen is drawn pale with how long ago. The other is the minimap.
 
-    ./run.sh preview                          # live window
-    ./run.sh preview --camera 0               # overlay on a real camera
+Three things can sit behind the overlay, and --camera picks which:
+
+    nothing         a wireframe of the room traced from the mapped grid, which
+                    stands in for what see-through glasses let the eye supply
+    0, /dev/video1  a real camera, the one the container was started with
+    drone           what the aircraft sees, sent down the feed by ar_bridge
+                    --video; ar_video:=false turns that off
+
+    ./run.sh preview                          # live windows
+    ./run.sh preview --camera drone           # overlay on the drone's camera
+    ./run.sh preview --camera 0 --hfov 78     # overlay on a camera of your own
     ./run.sh preview --save ar.png            # one frame to a file
     ./run.sh preview --viewer -15 0 0         # x, y and yaw the wearer starts at
 
-The window is resizable and scales its contents to fit.
+Only a camera of your own has a field of view that must be told (--hfov): the
+wireframe and the drone's image are drawn with the one the overlay assumes.
 
     W S     walk forward and back        arrows or I J K L    look around
     A D     step left and right          q or Escape          quit
@@ -25,7 +33,8 @@ The camera and the feed run at different rates, so they are read separately: the
 newest payload is kept by a background task and drawn onto whatever camera frame
 is current. The picture therefore never waits for the feed, and the boxes are
 always the most recent ones rather than a frame-matched pair - matching them
-would need a timestamp the camera does not share with the drone.
+would need a timestamp your own camera does not share with the drone. With
+--camera drone both come from the same payload and the question does not arise.
 """
 
 from __future__ import annotations
@@ -57,13 +66,15 @@ LOST = (140, 140, 200)
 WALL, FLOOR, HORIZON = (90, 90, 90), (55, 55, 55), (45, 45, 45)
 FLOOR_STEP, FLOOR_EXTENT = 2.0, 24.0    # m between floor lines, and how far they run
 FADE_FULL, FADE_MIN = 30.0, 0.3         # a line is dimmest this far off, but never darker
-WINDOW = "AR glasses"
-INSET_W = 220               # px wide the minimap is drawn in the corner
-INSET_MARGIN = 10
+WINDOWS = ("AR glasses", "minimap")
 DRAW_RATE = 30.0            # Hz the window is redrawn at when there is no camera to pace it
 
 # Where the wearer is and where they are looking: x, y, yaw, pitch.
 Viewer = tuple[float, float, float, float]
+
+DRONE_CAMERA = "drone"      # --camera drone: what the aircraft sees, over the feed
+# Must match CAMERA_PITCH in launch/camera.launch.py: the camera looks this far down.
+DRONE_PITCH = -0.2618
 
 
 def colour(target: dict) -> tuple[int, int, int]:
@@ -123,7 +134,8 @@ def outlines(grid: dict) -> list[np.ndarray]:
     return polygons
 
 
-def wallhack(frame: dict, viewer: Viewer, scene: np.ndarray | None = None) -> np.ndarray:
+def wallhack(frame: dict, viewer: Viewer, scene: np.ndarray | None = None,
+             eye_height: float = EYE_HEIGHT) -> np.ndarray:
     """The overlay, over a real camera image if one is given and a wireframe if not.
 
     With a camera the room is already in the picture, so the floor, horizon and
@@ -133,7 +145,7 @@ def wallhack(frame: dict, viewer: Viewer, scene: np.ndarray | None = None) -> np
     image = cv2.resize(scene, (VIEW_W, VIEW_H)) if scene is not None \
         else np.full((VIEW_H, VIEW_W, 3), 30, np.uint8)
     vx, vy, yaw, pitch = viewer
-    eye = np.array([vx, vy, EYE_HEIGHT])
+    eye = np.array([vx, vy, eye_height])
     focal = VIEW_W / 2 / math.tan(VIEW_HFOV / 2)
     # The three axes of the head: where it looks, its left, and its up. Pitch tilts
     # the first and the third and leaves left alone, which is what stops a look
@@ -240,21 +252,17 @@ def wallhack(frame: dict, viewer: Viewer, scene: np.ndarray | None = None) -> np
     return image
 
 
-def compose(frame: dict, viewer: Viewer, scene: np.ndarray | None = None) -> np.ndarray:
-    """The view with the minimap inset in its top right, which is the whole picture."""
-    image = wallhack(frame, viewer, scene)
-    plan = minimap(frame, viewer)
-    inset = cv2.resize(plan, (INSET_W, round(INSET_W * plan.shape[0] / plan.shape[1])))
-    h, w = inset.shape[:2]
-    if h + 2 * INSET_MARGIN > VIEW_H:            # a tall map would cover the view
-        inset = cv2.resize(inset, (round(w * (VIEW_H - 2 * INSET_MARGIN) / h),
-                                   VIEW_H - 2 * INSET_MARGIN))
-        h, w = inset.shape[:2]
-    x = VIEW_W - w - INSET_MARGIN
-    image[INSET_MARGIN:INSET_MARGIN + h, x:x + w] = inset
-    cv2.rectangle(image, (x - 1, INSET_MARGIN - 1), (x + w, INSET_MARGIN + h),
-                  (255, 255, 255), 1)
-    return image
+def compose(frame: dict, viewer: Viewer, scene: np.ndarray | None = None,
+            eye_height: float = EYE_HEIGHT) -> np.ndarray:
+    """The two panes side by side, for --save: a file cannot be two windows."""
+    left, right = minimap(frame, viewer), wallhack(frame, viewer, scene, eye_height)
+    height = max(left.shape[0], right.shape[0])
+
+    def pad(image: np.ndarray) -> np.ndarray:
+        return cv2.copyMakeBorder(image, 0, height - image.shape[0], 0, 0,
+                                  cv2.BORDER_CONSTANT, value=(0, 0, 0))
+
+    return np.hstack([pad(left), pad(right)])
 
 
 # GTK reports the arrows in the 65361-65364 block and the other backends in
@@ -289,8 +297,12 @@ def walk(viewer: Viewer, key: int) -> Viewer:
 
 
 def open_camera(source: str | None) -> cv2.VideoCapture | None:
-    """The wearer's own camera, by index or device path. Absent is not an error."""
-    if source is None:
+    """The wearer's own camera, by index or device path. Absent is not an error.
+
+    "drone" is not one of these: that image comes down the feed with the tracks,
+    so there is no device to open.
+    """
+    if source is None or source == DRONE_CAMERA:
         return None
     capture = cv2.VideoCapture(int(source) if source.isdigit() else source)
     if not capture.isOpened():
@@ -311,30 +323,53 @@ async def feed(url: str, latest: dict) -> None:
 
 
 async def show(url: str, viewer: Viewer, save: str | None,
-               camera: cv2.VideoCapture | None) -> None:
+               camera: cv2.VideoCapture | None, drone_view: bool) -> None:
     latest: dict = {}
     reader = asyncio.create_task(feed(url, latest))
+
+    def background(frame: dict) -> np.ndarray | None:
+        """Whatever is behind the overlay this frame, or None for the wireframe."""
+        if camera is not None:
+            read, scene = camera.read()
+            return scene if read else None
+        if drone_view and frame.get("view"):
+            jpeg = np.frombuffer(base64.b64decode(frame["view"]), np.uint8)
+            return cv2.imdecode(jpeg, cv2.IMREAD_COLOR)
+        return None
+
+    def eyes(frame: dict, viewer: Viewer) -> tuple[Viewer, float]:
+        """Where to draw the overlay from, and how high off the floor that is.
+
+        Behind the drone's own image it has to be the drone, tilted the way its
+        camera is bolted on - drawn from the wearer instead, every box would land
+        somewhere the picture does not show. Walking therefore does nothing in that
+        mode, because the aircraft is doing the moving.
+        """
+        if drone_view and frame.get("drone"):
+            d = frame["drone"]
+            return (d["x"], d["y"], d["yaw"], DRONE_PITCH), d["z"]
+        return viewer, EYE_HEIGHT
+
     try:
         while "frame" not in latest:
             await asyncio.sleep(0.01)
             if reader.done():
                 await reader                     # the connection failed; report why
         if save:
-            read, scene = camera.read() if camera else (False, None)
-            cv2.imwrite(save, compose(latest["frame"], viewer, scene if read else None))
+            pose, eye = eyes(latest["frame"], viewer)
+            cv2.imwrite(save, compose(latest["frame"], pose, background(latest["frame"]), eye))
             print(f"wrote {save}")
             return
 
-        # WINDOW_NORMAL lets the window be dragged to any size and scales the frame
+        # WINDOW_NORMAL lets a window be dragged to any size and scales the frame
         # into it; KEEPRATIO stops that scaling from stretching the view.
-        cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
+        for name in WINDOWS:
+            cv2.namedWindow(name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
         while True:
-            scene = None
-            if camera is not None:
-                read, scene = camera.read()
-                if not read:
-                    scene = None
-            cv2.imshow(WINDOW, compose(latest["frame"], viewer, scene))
+            frame = latest["frame"]
+            pose, eye = eyes(frame, viewer)
+            cv2.imshow(WINDOWS[0], wallhack(frame, pose, background(frame), eye))
+            cv2.imshow(WINDOWS[1], minimap(frame, viewer))
             key = cv2.waitKey(1)
             if key in (ord("q"), 27):
                 return
@@ -354,14 +389,18 @@ def main() -> None:
                         metavar=("X", "Y", "YAW"), help="where the wearer starts, map frame")
     parser.add_argument("--hfov", type=float, help="camera's horizontal field of view, degrees")
     parser.add_argument("--save", help="write one frame to this path and exit")
-    parser.add_argument("--camera", help="index or device of the camera to draw the overlay on")
+    parser.add_argument("--camera", metavar="SOURCE",
+                        help="what to draw the overlay on: a camera index or device, "
+                             f"or {DRONE_CAMERA!r} for the aircraft's own view "
+                             "(needs ar_bridge --video)")
     args = parser.parse_args()
     if args.hfov:
         global VIEW_HFOV
         VIEW_HFOV = math.radians(args.hfov)
     camera = open_camera(args.camera)
     try:
-        asyncio.run(show(args.url, (*args.viewer, 0.0), args.save, camera))
+        asyncio.run(show(args.url, (*args.viewer, 0.0), args.save, camera,
+                         args.camera == DRONE_CAMERA))
     except KeyboardInterrupt:
         pass
     finally:

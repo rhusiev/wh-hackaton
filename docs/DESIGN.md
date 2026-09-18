@@ -200,8 +200,13 @@ This is the part the idea actually needs, and it is four pieces:
    way the glasses would, with lost people pale. It also traces the occupied
    cells into a wireframe of the room, which real glasses would not send - the
    wearer sees that through the optics, and on a monitor there is nothing behind
-   the overlay without it. `--camera` puts a real camera image there instead. It
-   is one resizable window with the minimap inset in a corner; WASD walks the
+   the overlay without it. `--camera N` puts a webcam behind the overlay instead,
+   and `--camera drone` the aircraft's own colour image, which the bridge sends
+   as a JPEG in `"view"` when launched with `--video` (`ar_video:=false` turns
+   that off - real glasses do not want it, the wearer is not looking at a
+   screen). Behind the drone's image the overlay is drawn from the drone's pose
+   and camera pitch rather than the wearer's, so walking does nothing there.
+   Two resizable windows, the glasses view and the minimap; WASD walks the
    wearer and the arrows or IJKL aim their head.
 
 Fly with:

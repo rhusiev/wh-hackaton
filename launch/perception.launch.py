@@ -49,6 +49,9 @@ def generate_launch_description() -> LaunchDescription:
         # The known-pose grid mapper; with slam:=true RTAB-Map publishes /map instead.
         DeclareLaunchArgument("mapper", default_value="true", choices=["true", "false"]),
         DeclareLaunchArgument("ar", default_value="true", choices=["true", "false"]),
+        # The drone's colour image in the AR payload, for ./run.sh preview --camera
+        # drone. Real glasses do not want it: the wearer is not looking at a screen.
+        DeclareLaunchArgument("ar_video", default_value="true", choices=["true", "false"]),
         # Only the truth detector needs it: it reads that world's people.
         DeclareLaunchArgument("world", default_value="warehouse"),
     ]
@@ -87,11 +90,18 @@ def generate_launch_description() -> LaunchDescription:
                                     ("--world", LaunchConfiguration("world"))))
     ]
 
-    ar_bridge = ExecuteProcess(
-        cmd=_script("ar_bridge.py", "--port", LaunchConfiguration("ar_port")),
-        output="screen",
-        condition=IfCondition(LaunchConfiguration("ar")),
-    )
+    # Two processes, one condition each: a flag cannot be a substitution, because an
+    # empty argument is still an argument and argparse would reject it.
+    ar_bridge = [
+        ExecuteProcess(
+            cmd=_script("ar_bridge.py", "--port", LaunchConfiguration("ar_port"), *extra),
+            output="screen",
+            condition=IfCondition(PythonExpression(
+                ["'", LaunchConfiguration("ar"), "' == 'true' and '",
+                 LaunchConfiguration("ar_video"), f"' == '{video}'"])),
+        )
+        for video, extra in (("true", ("--video",)), ("false", ()))
+    ]
 
     scan_relay = ExecuteProcess(cmd=_script("scan_relay.py"), output="screen")
     vision_relay = ExecuteProcess(cmd=_script("vision_relay.py"), output="screen",
@@ -154,5 +164,5 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     return LaunchDescription(
-        args + [to_scan, scan_relay, grid_mapper, *detectors, ar_bridge, visual_odometry, rtabmap,
-                vision_relay])
+        args + [to_scan, scan_relay, grid_mapper, *detectors, *ar_bridge, visual_odometry,
+                rtabmap, vision_relay])
