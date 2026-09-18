@@ -99,8 +99,11 @@ class Flight(Copter):
             self.setpoint.publish(self.target)
 
     def take_off(self) -> None:
-        self.require(lambda: self.local is not None and self._has_pose(),
-                     f"local position and {self.map_frame} -> {self.body_frame}")
+        # connected only becomes true on a real State message, so waiting for it is
+        # what makes armed below mean anything: state arrives at 1 Hz against the
+        # local pose's 30, and reading it too early reports a flying drone as idle.
+        self.require(lambda: self.state.connected and self.local is not None and self._has_pose(),
+                     f"state, local position and {self.map_frame} -> {self.body_frame}")
         # A run stopped in mid-air leaves the drone armed and hovering, and ArduPilot
         # refuses to take off from a height it is already at. Resuming instead of
         # taking off again lets the first leg of the mission fly it back to altitude.
