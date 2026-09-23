@@ -53,7 +53,8 @@ To check that everything works, or to see what the drone and the glasses see:
 ```bash
 ./run.sh smoke    # prints PASS/FAIL for every topic and link
 ./run.sh demo     # colour with people and head boxes, and depth, one window each
-./run.sh preview  # the through-the-wall view the glasses get, plus a minimap window
+./run.sh preview  # the glasses view: the sim rendered from where you walk, people boxed
+                  # through the walls, plus a minimap window
 ./run.sh score    # which of the 6 hidden people were found, and how accurately
 ```
 
@@ -75,7 +76,8 @@ Stop with Ctrl+C in terminal 1, and `./run.sh down` to remove the container
 ./run.sh sim sitl:=true detector:=none      # no detector, run your own (also mapper:=false, ar:=false)
 ./run.sh explore --lanes 2                  # shorter demo flight
 ./run.sh demo --save frame.png              # one frame to a file, no window needed
-./run.sh preview --viewer -15 0 0           # glasses view from x, y, yaw; WASD walks and turns
+./run.sh preview --viewer -15 0 0           # glasses view from x, y, yaw; WASD walks, IJKL looks
+./run.sh preview --camera none              # a wireframe of the mapped room behind the overlay instead
 CAMERA=/dev/video1 ./run.sh up              # pass a camera in (not every node captures), then:
 ./run.sh preview --camera 0                 # the overlay on a real camera instead of the wireframe
 ./run.sh preview --camera drone             # the overlay on what the drone sees
@@ -92,6 +94,7 @@ in the second terminal. In its MAVProxy console type `mode guided`,
 | Path | What |
 | --- | --- |
 | `models/tricopter/` | the drone and its camera |
+| `models/wearer/` | the glasses wearer's eyes, a camera the preview walks around |
 | `models/people/`, `models/detector/` | the people to find and the YOLO11n-pose network |
 | `worlds/` | the two worlds, regenerated with `python3 scripts/gen_warehouse.py` or `gen_garden.py` |
 | `config/tricopter.parm` | ArduPilot parameters. After editing run `WIPE=1 ./run.sh sitl` |

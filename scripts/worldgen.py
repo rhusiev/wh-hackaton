@@ -22,6 +22,9 @@ PERSON_SIZE = (0.5, 0.4, 1.62)
 TEXTURE_URI = "model://surfaces/materials/textures"
 DRONE = "tricopter"
 DRONE_START = (-13.5, 0.0, 0.2, 0.0)    # x, y, z, yaw; config/gz_bridge.yaml uses the name too
+# The AR glasses' camera, where ar_preview.py starts the wearer. It moves it from there.
+WEARER = "wearer"
+WEARER_START = (-15.5, 0.0, 1.7, 0.0)
 
 
 def material(colour: tuple[float, float, float], texture: str | None, indent: str) -> list[str]:
@@ -108,6 +111,11 @@ def drone() -> str:
     return include(DRONE, DRONE, *DRONE_START)
 
 
+def wearer() -> str:
+    """The glasses' camera, in the world from the start for the same reason as the drone."""
+    return include(WEARER, WEARER, *WEARER_START)
+
+
 def targets(spots) -> tuple[list[str], list[dict]]:
     """The people models and where they really are, one per (x, y, yaw, kind) spot."""
     models, truth = [], []
@@ -181,6 +189,8 @@ def world(name: str, generator: str, seed: int, scene: str, lights: str, models:
 {models}
 
 {drone()}
+
+{wearer()}
 
   </world>
 </sdf>

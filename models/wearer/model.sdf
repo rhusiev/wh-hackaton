@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <!-- The model's pose is the eye: ar_preview.py sets it with set_pose, pitch
+       included. Static and without visuals or collisions, so nothing flies into
+       it and the drone's camera does not see it. -->
+  <model name="wearer">
+    <static>true</static>
+    <link name="eye">
+      <!-- Renders only while something subscribes, so it costs nothing without the preview. -->
+      <sensor name="view" type="camera">
+        <always_on>1</always_on>
+        <update_rate>15</update_rate>
+        <topic>wearer/image</topic>
+        <camera>
+          <!-- Must match VIEW_W, VIEW_H and VIEW_HFOV in scripts/ar_preview.py. -->
+          <horizontal_fov>1.0472</horizontal_fov>
+          <image>
+            <width>640</width>
+            <height>400</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip><near>0.1</near><far>60.0</far></clip>
+        </camera>
+      </sensor>
+    </link>
+  </model>
+</sdf>

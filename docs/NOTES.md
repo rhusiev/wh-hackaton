@@ -721,3 +721,28 @@ widget scrolls itself with the arrows once the picture is larger than the
 window, which the 640x400 glasses view usually is and the small minimap is not.
 Nothing in our code sees those presses. I J K L does the same thing and is never
 swallowed, so that is the pair to document.
+
+## A gz-transport request times out on a node that is receiving images
+
+`ar_preview.py` moves the wearer's camera with the `/world/<name>/set_pose`
+service and reads `/wearer/image`, both through the gz-transport 13 Python
+bindings. Made from the node that holds the image subscription, a request
+succeeds only if no image arrives while it waits. Once one does, the request
+returns `(False, )` after the full timeout, every time: with 15 images a second
+that is nearly always. The same request from a second `Node` in the same process
+comes back in under a millisecond while the images keep flowing, so the camera
+gets two nodes, one to listen and one to ask.
+
+The very first request from a fresh node can still miss, because service
+discovery takes about 0.1 s and sometimes more. A failed move is therefore just
+tried again on the next frame.
+
+A static model moved with `set_pose` takes its sensors with it: the camera
+renders from the new pose from the next frame on. Its first frame after the move
+may still show the old one, so the preview discards one image after each move.
+
+The same bindings crash the interpreter on exit about one run in six: an image
+delivered on gz-transport's own thread while Python is finalizing segfaults it
+(exit code 139, after the script's last line has run, so `faulthandler` catches
+nothing). Unsubscribing before exit stopped it - 0 crashes in 55 runs - so
+`WearerCamera.close()` does that and the preview calls it on the way out.

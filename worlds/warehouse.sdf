@@ -4601,5 +4601,11 @@
       <pose>-13.5 0 0.2 0 0 0</pose>
     </include>
 
+    <include>
+      <uri>model://wearer</uri>
+      <name>wearer</name>
+      <pose>-15.5 0 1.7 0 0 0</pose>
+    </include>
+
   </world>
 </sdf>

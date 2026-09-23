@@ -197,15 +197,21 @@ This is the part the idea actually needs, and it is four pieces:
 
    Metres in the map frame, so the Lens only has to scale and rotate. `"head"`
    is missing when no head was seen. `./run.sh preview` draws this payload the
-   way the glasses would, with lost people pale. It also traces the occupied
-   cells into a wireframe of the room, which real glasses would not send - the
-   wearer sees that through the optics, and on a monitor there is nothing behind
-   the overlay without it. `--camera N` puts a webcam behind the overlay instead,
+   way the glasses would, with lost people pale. What the wearer would see
+   through the optics comes from a camera in the world (`models/wearer`, a
+   static model with no body), which the preview moves with Gazebo's `set_pose`
+   as the wearer walks and reads straight off `/wearer/image` over gz-transport.
+   Each image is paired with the pose it was rendered from, so the boxes are
+   drawn from where the picture was taken rather than where the wearer has just
+   stepped to. With no sim rendering it the preview falls back to tracing the
+   occupied cells into a wireframe of the room, which `--camera none` also asks
+   for. `--camera N` puts a webcam behind the overlay instead,
    and `--camera drone` the aircraft's own colour image, which the bridge sends
    as a JPEG in `"view"` when launched with `--video` (`ar_video:=false` turns
    that off - real glasses do not want it, the wearer is not looking at a
-   screen). Behind the drone's image the overlay is drawn from the drone's pose
-   and camera pitch rather than the wearer's, so walking does nothing there.
+   screen). Behind the drone's image the overlay is drawn from the drone's pose,
+   camera pitch and 68.8 deg field of view rather than the wearer's, so walking
+   does nothing there.
    Two resizable windows, the glasses view and the minimap; WASD walks the
    wearer and the arrows or IJKL aim their head.
 
