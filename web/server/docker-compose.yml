@@ -1,0 +1,9 @@
+# sshd only binds a remote forward to the server's loopback, which Caddy's container
+# cannot reach, so this relays it to the docker bridge address Caddy calls host.docker.internal.
+services:
+  feed-relay:
+    image: alpine/socat
+    container_name: xr-feed-relay
+    restart: unless-stopped
+    network_mode: host
+    command: TCP-LISTEN:8791,bind=172.17.0.1,fork,reuseaddr TCP:127.0.0.1:8790

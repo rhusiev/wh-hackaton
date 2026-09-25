@@ -24,7 +24,7 @@ DRONE = "tricopter"
 DRONE_START = (-13.5, 0.0, 0.2, 0.0)    # x, y, z, yaw; config/gz_bridge.yaml uses the name too
 # The AR glasses' camera, where ar_preview.py starts the wearer. It moves it from there.
 WEARER = "wearer"
-WEARER_START = (-15.5, 0.0, 1.7, 0.0)
+WEARER_START = (-14.5, 0.0, 1.7, 0.0)
 
 
 def material(colour: tuple[float, float, float], texture: str | None, indent: str) -> list[str]:
@@ -213,4 +213,5 @@ def write(output: Path, text: str, spots) -> None:
     truth = output.with_name(f"{output.stem}_targets.json")
     _, entries = targets(spots)
     truth.write_text(json.dumps({"world": output.stem, "targets": entries}, indent=2))
-    print(f"wrote {output} and {truth}")
+    from world_layout import write_layout
+    print(f"wrote {output}, {truth} and {write_layout(output.stem, text)}")

@@ -80,7 +80,7 @@ companion computer and re-test the flight envelope on the real machine.
 | Luxonis OAK-D | Gazebo `rgbd_camera`, 640×400 @ 15 Hz, 68.8° HFOV, depth 0.7–30 m (12 m reliable) |
 | OAK-D on-device YOLO | `scripts/person_detector.py`, YOLO11n-pose on the CPU, same `vision_msgs/Detection3DArray` contract |
 | Raspberry Pi 5 8 GB | **not modelled as a bottleneck.** Everything runs on the desktop; the rates are picked to fit the Pi |
-| Spectacles 2024 | `scripts/ar_bridge.py` — a WebSocket of JSON the Lens draws |
+| Spectacles 2024 | `scripts/ar_bridge.py` — a WebSocket of JSON that `web/index.html` draws in the Spectacles Browser over WebXR |
 
 One Gazebo sensor cannot have separate colour and stereo optics, so it carries
 the colour FOV (68.8°): depthai aligns depth into the colour frame, and that
@@ -184,7 +184,7 @@ This is the part the idea actually needs, and it is four pieces:
    10 Hz:
 
    ```json
-   {"t": 41.2,
+   {"t": 41.2, "world": "warehouse",
     "drone": {"x": -13.4, "y": 0.1, "z": 2.5, "yaw": 0.02},
     "targets": [{"id": 0, "label": "person", "status": "confirmed",
                  "x": -9.0, "y": 0.0, "z": 0.8,

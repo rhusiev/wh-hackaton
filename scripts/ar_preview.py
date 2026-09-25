@@ -59,7 +59,7 @@ import cv2
 import numpy as np
 import websockets
 from worldgen import WEARER as WEARER_MODEL
-from worldgen import default_world
+from worldgen import WEARER_START, default_world
 
 MINIMAP_SCALE = 16          # px per m
 # Must match the camera in models/wearer/model.sdf.
@@ -491,7 +491,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--url", default="ws://localhost:8790")
-    parser.add_argument("--viewer", type=float, nargs=3, default=(-15.5, 0.0, 0.0),
+    parser.add_argument("--viewer", type=float, nargs=3, default=(*WEARER_START[:2], WEARER_START[3]),
                         metavar=("X", "Y", "YAW"), help="where the wearer starts, map frame")
     parser.add_argument("--hfov", type=float, help="your camera's horizontal field of view, degrees")
     parser.add_argument("--save", help="write one frame to this path and exit")

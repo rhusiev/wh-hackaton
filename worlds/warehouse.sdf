@@ -4604,7 +4604,7 @@
     <include>
       <uri>model://wearer</uri>
       <name>wearer</name>
-      <pose>-15.5 0 1.7 0 0 0</pose>
+      <pose>-14.5 0 1.7 0 0 0</pose>
     </include>
 
   </world>

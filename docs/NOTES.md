@@ -709,6 +709,14 @@ orphan by asking whether any sim is running at all, because neither side can see
 the other's processes: the host's `fuser` cannot look into the container's PID
 namespace, and the container cannot look out.
 
+The sweep also has to take the `sem.fastrtps_*` files, the mutexes beside each
+port. After killing a sim and deleting only `fastrtps_*`, every ROS process of the
+next run logged `RTPS_TRANSPORT_SHM Error ... Failed init_port fastrtps_port7000:
+open_and_lock_file failed` for the ports whose mutex had survived, and ArduCopter
+refused to arm with `PRX1: No Data`. Deleting both and starting a fresh container
+cleared the errors and it armed at once. Which of the two did it was not
+separated.
+
 ## The arrow keys reach OpenCV from one window and not the other
 
 `ar_preview.py` opens two windows and reads keys with `cv2.waitKeyEx`, which
@@ -746,3 +754,35 @@ delivered on gz-transport's own thread while Python is finalizing segfaults it
 (exit code 139, after the script's last line has run, so `faulthandler` catches
 nothing). Unsubscribing before exit stopped it - 0 crashes in 55 runs - so
 `WearerCamera.close()` does that and the preview calls it on the way out.
+
+## Spectacles run WebXR pages, not only Lenses
+
+Lens Studio, the only way to build a native Lens, has no Linux build. The
+glasses' Browser, since the November 2025 Snap OS update (tested on
+5.064.0453), supports WebXR, and a page from a secure origin reports
+`immersive-ar` and `immersive-vr` as supported. Browser is a Lens in Lens
+Explorer, but Lens Explorer's search does not find it - scroll to it.
+
+In an `immersive-ar` session the Browser window stays in front of the wearer, it
+is not hidden as WebXR describes. Our content has to sit where the window is not.
+
+three.js asks for the `local-floor` reference space by default, whose origin is
+on the floor: a cube at (0, 0, -1) sat at the wearer's feet. `local` puts the
+origin at the head when the session starts.
+
+## A reverse ssh tunnel is only reachable from the server itself
+
+`ssh -R 8790:...` binds the server's 127.0.0.1 unless sshd has `GatewayPorts`,
+which the netcup server leaves off, and changing it needs root. Caddy runs in a
+container and reaches the host as `host.docker.internal`, the docker bridge
+172.17.0.1, not the host's loopback. `web/server/docker-compose.yml` runs socat
+on the host network to relay 172.17.0.1:8791 to 127.0.0.1:8790, which keeps the
+feed off the public interface.
+
+## Palm-down hands track poorly on the Spectacles
+
+A hand held palm down, with the back facing the glasses, was often lost or given a wrong
+wrist orientation, and a minimap tied to it jumped back into the air. A palm held up
+toward the glasses tracks much better, so the hand minimap uses the right palm up,
+reads the orientation from the middle-finger metacarpal rather than the wrist, and
+rides out short dropouts

@@ -15,6 +15,7 @@
 #   ./run.sh walk [args]    walk a person to a new spot in a running sim
 #   ./run.sh demo [args]    colour and depth side by side from a running sim
 #   ./run.sh preview [args] what the AR glasses would draw, from the AR feed
+#   ./run.sh glasses        tunnel the AR feed to $XR_SSH, where web/ is served
 #   ./run.sh shell          interactive shell
 #   ./run.sh down           stop and remove the container
 #
@@ -36,7 +37,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 # segment is an orphan. Run ROS on the host as well and this would clear it too.
 sweep_shm() {
     docker compose exec -u root -T sim bash -lc \
-        'pgrep -f "gz sim|mavros_node|parameter_bridge" >/dev/null || rm -f /dev/shm/fastrtps_*' \
+        'pgrep -f "gz sim|mavros_node|parameter_bridge" >/dev/null || rm -f /dev/shm/fastrtps_* /dev/shm/sem.fastrtps_*' \
         2>/dev/null || true
 }
 
@@ -68,6 +69,10 @@ case "${cmd}" in
     world) exec_in "./scripts/gen_${1:-warehouse}.py ${*:2}" ;;
     demo)  exec_in "./scripts/camera_demo.py $*" ;;
     preview) exec_in "./scripts/ar_preview.py $*" ;;
+    # On the host: the tunnel needs the user's ssh keys, and the feed is on host networking anyway.
+    glasses) : "${XR_SSH:?set XR_SSH to the ssh arguments of the server, e.g. -i key user@host}"
+           echo "AR feed on the server's 127.0.0.1:8790, Ctrl-C to stop"
+           ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -R 8790:localhost:8790 ${XR_SSH} ;;
     shell) docker compose exec -u ubuntu sim bash -l ;;
     *)     exec_in "${cmd} $*" ;;
 esac

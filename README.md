@@ -100,8 +100,41 @@ in the second terminal. In its MAVProxy console type `mode guided`,
 | `config/tricopter.parm` | ArduPilot parameters. After editing run `WIPE=1 ./run.sh sitl` |
 | `launch/` | what `./run.sh sim` starts |
 | `scripts/` | detector, mapper, AR bridge (WebSocket JSON on port 8790), explore, tests |
+| `web/` | the glasses' page, and the server side that serves it with the feed |
 
-The AR app connects to `ws://<host>:8790`
+## On the Spectacles
+
+The glasses run no Lens of ours: `web/index.html` is a WebXR page opened in the
+Spectacles Browser. It draws the AR feed twice - a minimap, and the people
+life-size where they are. For the life-size part the wearer is placed at the
+sim's wearer start (x -14.5, y 0, facing +x) when entering AR, and walking the
+room walks the sim; `?at=x,y,yaw_deg` and `?eye=` change that. In AR and VR the
+minimap, 25 cm wide, shows only on a right hand held palm up, just above the
+palm; on a desktop it is 0.6 m wide below eye level. Around the wearer the sim
+itself is drawn too, as outlines in AR and solid in VR, from
+`web/worlds/<world>.json`, which `scripts/world_layout.py` writes whenever a
+world is generated. The people are the sim's own meshes, served through the
+`web/people` link to `models/people`, in both modes. The drone is the sim's
+model, with its edges and a cone above it drawn through walls. The world is the
+one the feed names; `?world=` overrides it.
+
+The page needs HTTPS and the glasses need to reach the feed, so both go through a
+server: Caddy serves `web/` and proxies `/feed` to port 8790, which
+`./run.sh glasses` forwards from this machine over ssh.
+
+```bash
+./run.sh sim sitl:=true gui:=false ar_video:=false   # the drone's image is 1 MB/s nobody looks at
+./run.sh explore --strategy watch
+XR_SSH="-i ~/.ssh/key user@server" ./run.sh glasses
+```
+
+Then Browser on the glasses (Lens Explorer, it does not come up in search),
+open the site and tap Enter AR. A desktop browser shows the same scene without
+AR, and `?feed=ws://localhost:8790` points it at a local sim.
+
+Server side, once: `web/server/Caddyfile` goes into Caddy's config with `web/`
+copied to the site root, following the `web/people` link
+(`tar -h -C web -cf - index.html worlds people`), and `web/server/docker-compose.yml` runs next to it.
 
 ## Troubleshooting
 

@@ -1,0 +1,9 @@
+https://xr.r1a.nl:443 {
+    handle /feed {
+        reverse_proxy host.docker.internal:8791
+    }
+    handle {
+        root * /srv/xr
+        file_server
+    }
+}

@@ -8,7 +8,7 @@ frame tracks that persist, and pushes a small JSON snapshot at a fixed rate.
 
 Payload, all lengths in metres in the map frame:
 
-    {"t": 1789594325.2,
+    {"t": 1789594325.2, "world": "warehouse",
      "drone": {"x": -13.4, "y": 0.1, "z": 2.0, "yaw": 0.02},
      "targets": [{"id": 0, "label": "person", "status": "confirmed", "x": -9.0, "y": 0.0, "z": 0.81, "h": 1.62,
                   "head": {"x": -9.0, "y": 0.02, "z": 1.5, "size": 0.22},
@@ -52,6 +52,7 @@ from occupancy import OCCUPIED, UNKNOWN, Grid
 from plugin import load
 from tracker import Sighting, Tracker
 from view import CameraView
+from worldgen import default_world
 
 MAP_PERIOD = 1.0
 # What the drone is looking at, for a preview that has no camera of its own. JPEG
@@ -60,8 +61,9 @@ VIEW_QUALITY = 60
 
 
 class ArBridge(Node):
-    def __init__(self, video: bool = False) -> None:
+    def __init__(self, world: str, video: bool = False) -> None:
         super().__init__("ar_bridge")
+        self.world = world
         self.declare_parameters("", [
             ("map_frame", "map"),
             ("body_frame", "base_link"),
@@ -193,7 +195,7 @@ class ArBridge(Node):
 
     def snapshot(self) -> str:
         now = self.now()
-        payload = {"t": round(now, 2), "drone": None, "targets": []}
+        payload = {"t": round(now, 2), "world": self.world, "drone": None, "targets": []}
         try:
             tf = self.tf_buffer.lookup_transform(
                 self.map_frame, self.body_frame, rclpy.time.Time())
@@ -240,12 +242,13 @@ def main() -> None:
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8790)
     parser.add_argument("--rate", type=float, default=10.0)
+    parser.add_argument("--world", default=default_world(), help="named in the payload, for the glasses' layout")
     parser.add_argument("--video", action="store_true",
                         help="also send the drone's colour image, for ./run.sh preview")
     known, ros_args = parser.parse_known_args()
 
     rclpy.init(args=ros_args)
-    node = ArBridge(known.video)
+    node = ArBridge(known.world, known.video)
     thread = threading.Thread(
         target=lambda: asyncio.run(serve(node, known.host, known.port, known.rate)),
         daemon=True)

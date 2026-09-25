@@ -94,7 +94,8 @@ def generate_launch_description() -> LaunchDescription:
     # empty argument is still an argument and argparse would reject it.
     ar_bridge = [
         ExecuteProcess(
-            cmd=_script("ar_bridge.py", "--port", LaunchConfiguration("ar_port"), *extra),
+            cmd=_script("ar_bridge.py", "--port", LaunchConfiguration("ar_port"),
+                        "--world", LaunchConfiguration("world"), *extra),
             output="screen",
             condition=IfCondition(PythonExpression(
                 ["'", LaunchConfiguration("ar"), "' == 'true' and '",

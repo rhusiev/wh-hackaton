@@ -1,0 +1,425 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wh-hackaton glasses</title>
+<style>
+  body { font: 18px sans-serif; background: #111; color: #eee; margin: 1em }
+  button { font-size: 1.4em; padding: .4em 1em; margin: .3em .3em .3em 0 }
+  #status, #errors { white-space: pre; font-family: monospace }
+  #errors { color: #f66 }
+  canvas { display: block; width: 100%; height: 60vh; margin-top: .5em }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.169.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.169.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<button id="immersive-ar" disabled>Enter AR</button>
+<button id="immersive-vr" disabled>Enter VR</button>
+<div id="status">starting</div>
+<div id="errors"></div>
+<script>
+addEventListener("error", e => document.getElementById("errors").textContent += `error: ${e.message}\n`);
+addEventListener("unhandledrejection", e => document.getElementById("errors").textContent += `error: ${e.reason}\n`);
+</script>
+<script type="module">
+import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
+import { MTLLoader } from "three/addons/loaders/MTLLoader.js";
+
+// ?feed=ws://localhost:8790 to test against a local bridge, ?at=x,y,yaw_deg for where in
+// the sim the wearer stands when entering AR, ?eye= for their eye height in metres,
+// ?world=garden for the layout drawn around them instead of the one the feed names.
+const params = new URLSearchParams(location.search);
+const feedUrl = params.get("feed") ?? `wss://${location.host}/feed`;
+let startYaw = 0;
+const eye = Number(params.get("eye") ?? 1.7);
+const MINIMAP_SIZE = 0.6;
+const HAND_MINIMAP_SIZE = 0.25;
+// Markers on the minimap are drawn this much larger than life, or a person would be 7 mm wide.
+const MINIMAP_MARKERS = 3;
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType("local");
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 100);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 3));
+
+// Sim coordinates are x forward, y left, z up; WebXR's are x right, y up, -z forward.
+const simAxes = new THREE.Matrix4().makeBasis(
+  new THREE.Vector3(0, 0, -1), new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, 1, 0));
+
+function simFrame(scale, origin, group = new THREE.Group()) {
+  group.matrixAutoUpdate = false;
+  group.matrix.copy(simAxes)
+    .multiply(new THREE.Matrix4().makeRotationZ(-startYaw * Math.PI / 180))
+    .multiply(new THREE.Matrix4().makeScale(scale, scale, scale))
+    .multiply(new THREE.Matrix4().makeTranslation(-origin.x, -origin.y, -origin.z));
+  return group;
+}
+
+const world = new THREE.Group();
+scene.add(world);
+const simOfXr = new THREE.Matrix4();
+
+function placeWearer([x, y, yaw]) {
+  startYaw = yaw;
+  simFrame(1, new THREE.Vector3(x, y, eye), world);
+  simOfXr.copy(world.matrix).invert();
+  mapCells = "";
+  mapKey = "";
+}
+
+// The sim's racks and walls: outlines over the room in AR, solid in VR.
+const outlines = new THREE.Group();
+const solid = new THREE.Group();
+solid.visible = false;
+world.add(outlines, solid);
+let layoutName = null;
+
+// The sim's own person meshes: z up, feet at the origin, as Gazebo draws them.
+const meshes = new Map();
+function personMesh(obj) {
+  if (!meshes.has(obj)) {
+    const url = `people/${obj}`;
+    const dir = url.slice(0, url.lastIndexOf("/") + 1);
+    meshes.set(obj, new MTLLoader().setPath(dir).loadAsync(url.slice(dir.length).replace(/obj$/, "mtl")).then(materials => {
+      materials.preload();
+      return new OBJLoader().setMaterials(materials).loadAsync(url);
+    }));
+  }
+  return meshes.get(obj);
+}
+
+const figures = new THREE.Group();
+world.add(figures);
+
+async function figure([mesh, x, y, yaw]) {
+  const person = (await personMesh(mesh)).clone();
+  person.position.set(x, y, 0);
+  person.rotation.z = yaw;
+  figures.add(person);
+}
+
+function coloured(geometry, r, g, b) {
+  const count = geometry.attributes.position.count;
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(Array.from({ length: count }, () => [r, g, b]).flat(), 3));
+  return geometry;
+}
+
+// The sim's drone as it flies, and its edges drawn through walls.
+function droneModel(shapes) {
+  const merged = mergeGeometries(shapes.map(([shape, sx, sy, sz, r, g, b, ...pose]) => {
+    const geometry = shape === "box" ? new THREE.BoxGeometry(sx, sy, sz)
+      : new THREE.CylinderGeometry(sx, sy, sz, 16).rotateX(Math.PI / 2);
+    return coloured(geometry, r, g, b).applyMatrix4(new THREE.Matrix4().set(...pose, 0, 0, 0, 1));
+  }));
+  const edges = new THREE.LineSegments(new THREE.EdgesGeometry(merged),
+    new THREE.LineBasicMaterial({ color: 0x33aaff, transparent: true, opacity: 0.8, depthTest: false }));
+  const model = new THREE.Group();
+  model.add(new THREE.Mesh(merged, new THREE.MeshStandardMaterial({ vertexColors: true })), edges);
+  return model;
+}
+
+async function loadLayout(name) {
+  layoutName = name;
+  const { boxes, people, wearer, drone } = await (await fetch(`worlds/${name}.json`)).json();
+  if (!params.has("at")) {
+    placeWearer(wearer);
+  }
+  const merged = mergeGeometries(boxes.map(([x, y, z, sx, sy, sz, yaw, r, g, b]) => {
+    return coloured(new THREE.BoxGeometry(sx, sy, sz), r, g, b).applyMatrix4(new THREE.Matrix4().makeRotationZ(yaw).setPosition(x, y, z));
+  }));
+  solid.add(new THREE.Mesh(merged, new THREE.MeshStandardMaterial({ vertexColors: true })));
+  outlines.add(new THREE.LineSegments(new THREE.EdgesGeometry(merged),
+    new THREE.LineBasicMaterial({ color: 0x66ccff, transparent: true, opacity: 0.35 })));
+  figures.clear();
+  views[0].drone.add(droneModel(drone));
+  await Promise.all(people.map(figure));
+}
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStandardMaterial({ color: 0x3a3f44 }));
+solid.add(floor);
+
+const minimapAt = new THREE.Vector3(0, -0.35, -0.6);
+const minimap = new THREE.Group();
+scene.add(minimap);
+const tabletop = simFrame(1, new THREE.Vector3());
+minimap.add(tabletop);
+
+const material = colour => new THREE.MeshStandardMaterial({ color: colour, transparent: true });
+const PERSON = { confirmed: 0xff3333, lost: 0xbbbbbb };
+
+function personMarker(lifeSize) {
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 1), material(PERSON.confirmed));
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.5, 12, 8), material(PERSON.confirmed));
+  body.material.wireframe = head.material.wireframe = lifeSize;
+  const group = new THREE.Group();
+  group.add(body, head);
+  return { group, body, head };
+}
+
+// Life size, the cone floats above the model and, like its edges, shows through walls.
+function droneMesh({ lifeSize, markers }) {
+  const cone = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.8, 12), material(0x33aaff));
+  cone.rotation.z = -Math.PI / 2;
+  cone.scale.setScalar(markers);
+  cone.position.z = lifeSize ? 1 : 0;
+  cone.material.depthTest = !lifeSize;
+  const holder = new THREE.Group();
+  holder.add(cone);
+  return holder;
+}
+
+const views = [
+  { root: world, people: new Map(), lifeSize: true, markers: 2, wide: 1, tall: 1 },
+  // People twice their height on the minimap, so they read as standing figures at 3 cm.
+  { root: tabletop, people: new Map(), lifeSize: false, markers: MINIMAP_MARKERS, wide: 1.2, tall: 2 },
+];
+for (const view of views) {
+  view.drone = droneMesh(view);
+  view.root.add(view.drone);
+}
+
+const wearer = new THREE.Mesh(new THREE.SphereGeometry(0.3 * MINIMAP_MARKERS), material(0xffdd00));
+tabletop.add(wearer);
+
+const mapCanvas = document.createElement("canvas");
+const mapTexture = new THREE.CanvasTexture(mapCanvas);
+mapTexture.magFilter = THREE.NearestFilter;
+const mapPlane = new THREE.Mesh(
+  new THREE.PlaneGeometry(1, 1),
+  new THREE.MeshBasicMaterial({ map: mapTexture, transparent: true, side: THREE.DoubleSide }));
+mapPlane.visible = false;
+tabletop.add(mapPlane);
+let mapKey = "";
+let mapCells = "";
+
+function showMap(map) {
+  if (map.cells === mapCells) {
+    return;
+  }
+  mapCells = map.cells;
+  const key = `${map.w}x${map.h}@${map.x0},${map.y0}/${map.res}`;
+  if (key !== mapKey) {
+    mapKey = key;
+    mapCanvas.width = map.w;
+    mapCanvas.height = map.h;
+    mapTexture.dispose();
+    const w = map.w * map.res, h = map.h * map.res;
+    mapPlane.scale.set(w, h, 1);
+    mapPlane.position.set(map.x0 + w / 2, map.y0 + h / 2, 0);
+    simFrame(MINIMAP_SIZE / Math.max(w, h), new THREE.Vector3(map.x0 + w / 2, map.y0 + h / 2, 0), tabletop);
+  }
+  const cells = Uint8Array.from(atob(map.cells), c => c.charCodeAt(0));
+  const ctx = mapCanvas.getContext("2d");
+  const image = ctx.createImageData(map.w, map.h);
+  const COLOURS = [[40, 60, 40, 140], [255, 255, 255, 255], [0, 0, 0, 0]];
+  for (let row = 0; row < map.h; row++) {
+    for (let col = 0; col < map.w; col++) {
+      // Grid rows run along +y, canvas rows top down.
+      image.data.set(COLOURS[cells[row * map.w + col]], ((map.h - 1 - row) * map.w + col) * 4);
+    }
+  }
+  ctx.putImageData(image, 0, 0);
+  mapTexture.needsUpdate = true;
+  mapPlane.visible = true;
+}
+
+function showPeople(view, targets) {
+  const seen = new Set();
+  for (const t of targets) {
+    seen.add(t.id);
+    let marker = view.people.get(t.id);
+    if (!marker) {
+      marker = personMarker(view.lifeSize);
+      view.people.set(t.id, marker);
+      view.root.add(marker.group);
+    }
+    const { body, head } = marker;
+    const top = (t.head ? t.head.z - t.head.size / 2 : t.z + t.h / 2) * view.tall;
+    body.position.set(t.x, t.y, top / 2);
+    body.scale.set(view.wide, view.wide, top);
+    head.visible = Boolean(t.head);
+    if (t.head) {
+      head.position.set(t.x, t.y, t.head.z * view.tall);
+      head.scale.setScalar(t.head.size * view.wide);
+    }
+    for (const part of [body, head]) {
+      part.material.color.setHex(PERSON[t.status] ?? PERSON.confirmed);
+      part.material.opacity = t.status === "lost" ? 0.4 : 1;
+    }
+  }
+  for (const [id, marker] of view.people) {
+    if (!seen.has(id)) {
+      view.root.remove(marker.group);
+      view.people.delete(id);
+    }
+  }
+}
+
+let last = null;
+let messages = 0;
+let connected = false;
+let resets = 0;
+
+function show(payload) {
+  if (layoutName === null && payload.world) {
+    loadLayout(payload.world);
+  }
+  if (payload.map) {
+    showMap(payload.map);
+  }
+  for (const view of views) {
+    showPeople(view, payload.targets);
+    view.drone.visible = payload.drone !== null;
+    if (payload.drone) {
+      view.drone.position.set(payload.drone.x, payload.drone.y, payload.drone.z);
+      view.drone.rotation.z = payload.drone.yaw;
+    }
+  }
+}
+
+function connect() {
+  const socket = new WebSocket(feedUrl);
+  socket.onopen = () => { connected = true; };
+  socket.onmessage = event => {
+    last = JSON.parse(event.data);
+    messages++;
+    show(last);
+  };
+  socket.onclose = () => {
+    connected = false;
+    setTimeout(connect, 2000);
+  };
+}
+if (params.has("at")) {
+  placeWearer(params.get("at").split(",").map(Number));
+}
+if (params.has("world")) {
+  loadLayout(params.get("world"));
+}
+if (feedUrl !== "none") {
+  connect();
+}
+
+const head = new THREE.Vector3();
+const headInSim = new THREE.Vector3();
+
+// Hands arrive in either controller slot, so the right one is told by its handedness.
+let rightHand = null;
+for (const slot of [0, 1]) {
+  const hand = renderer.xr.getHand(slot);
+  hand.addEventListener("connected", event => {
+    if (event.data.handedness === "right") {
+      rightHand = hand;
+    }
+  });
+  hand.addEventListener("disconnected", () => {
+    if (rightHand === hand) {
+      rightHand = null;
+    }
+  });
+  scene.add(hand);
+}
+
+const palmCentre = new THREE.Vector3();
+const palmUp = new THREE.Vector3();
+const palmTurn = new THREE.Quaternion();
+const PALM_ON = 0.7;
+const PALM_OFF = 0.4;
+const PALM_HOLD_MS = 500;
+let onPalm = false;
+let palmSeen = -Infinity;
+
+// In XR the minimap rides only on a right hand held palm up; the desktop has it in front.
+// WebXR points a joint's -y out of the palm. Hysteresis and a short hold keep tracking wobble
+// from throwing the minimap back into the air.
+function placeMinimap(now) {
+  const joint = rightHand?.joints["middle-finger-metacarpal"];
+  if (joint?.visible) {
+    const up = palmUp.set(0, -1, 0).applyQuaternion(joint.getWorldQuaternion(palmTurn)).y;
+    if (up > (onPalm ? PALM_OFF : PALM_ON)) {
+      onPalm = true;
+      palmSeen = now;
+      joint.getWorldPosition(palmCentre);
+    }
+  }
+  onPalm &&= now - palmSeen < PALM_HOLD_MS;
+  minimap.visible = onPalm || !renderer.xr.isPresenting;
+  if (onPalm) {
+    minimap.position.set(palmCentre.x, palmCentre.y + 0.06, palmCentre.z);
+    minimap.scale.setScalar(HAND_MINIMAP_SIZE / MINIMAP_SIZE);
+  } else {
+    minimap.position.copy(minimapAt);
+    minimap.scale.setScalar(1);
+  }
+}
+
+function status() {
+  const lines = [`feed ${feedUrl}: ${connected ? "connected" : "not connected"}, ${messages} messages`];
+  if (last) {
+    const d = last.drone;
+    lines.push(d ? `drone at ${d.x.toFixed(1)}, ${d.y.toFixed(1)}, ${d.z.toFixed(1)}` : "no drone pose");
+    const counts = {};
+    for (const t of last.targets) {
+      counts[t.status] = (counts[t.status] ?? 0) + 1;
+    }
+    lines.push(`people: ${JSON.stringify(counts)}`, `map: ${last.map ? `${last.map.w}x${last.map.h}` : "none"}`);
+  }
+  lines.push(`you in the sim: ${headInSim.x.toFixed(1)}, ${headInSim.y.toFixed(1)}`, `tracking resets: ${resets}`);
+  document.getElementById("status").textContent = lines.join("\n");
+}
+setInterval(status, 500);
+
+
+renderer.setAnimationLoop(now => {
+  const pose = renderer.xr.isPresenting ? renderer.xr.getCamera() : camera;
+  headInSim.copy(pose.getWorldPosition(head)).applyMatrix4(simOfXr);
+  wearer.position.set(headInSim.x, headInSim.y, 0);
+  placeMinimap(now);
+  renderer.render(scene, camera);
+});
+
+function resize() {
+  const { clientWidth: w, clientHeight: h } = renderer.domElement;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+
+async function enter(mode) {
+  const session = await navigator.xr.requestSession(mode, { optionalFeatures: ["hand-tracking"] });
+  await renderer.xr.setSession(session);
+  renderer.xr.getReferenceSpace().addEventListener("reset", () => resets++);
+  const vr = mode === "immersive-vr";
+  solid.visible = vr;
+  outlines.visible = !vr;
+  renderer.setClearColor(0x202428, vr ? 1 : 0);
+}
+
+let immersive = false;
+for (const mode of ["immersive-ar", "immersive-vr"]) {
+  if (navigator.xr && await navigator.xr.isSessionSupported(mode).catch(() => false)) {
+    immersive = true;
+    const button = document.getElementById(mode);
+    button.disabled = false;
+    button.onclick = () => enter(mode);
+  }
+}
+// The desktop gets a view into the scene; the glasses only need the canvas once immersive.
+if (!immersive) {
+  document.body.append(renderer.domElement);
+  addEventListener("resize", resize);
+  resize();
+}
+</script>
+</body>
+</html>
