@@ -11,5 +11,6 @@ __pycache__/
 .vscode/
 .idea/
 
-# ./run.sh start logs
+# Local settings and ./run.sh start logs
+.env
 .run/

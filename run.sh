@@ -22,7 +22,7 @@
 #   ./run.sh walk [args]    walk a person to a new spot in a running sim
 #   ./run.sh demo [args]    colour and depth side by side from a running sim
 #   ./run.sh preview [args] what the AR glasses would draw, from the AR feed
-#   ./run.sh glasses        tunnel the AR feed to $XR_SSH (default xr.r1a.nl), where web/ is served
+#   ./run.sh glasses        tunnel the AR feed to $XR_SSH from .env, where web/ is served
 #   ./run.sh shell          interactive shell
 #   ./run.sh down           stop and remove the container
 #
@@ -33,6 +33,9 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 LOGS=.run
+
+# Local settings kept out of git, such as XR_SSH.
+[ -f .env ] && { set -a; . ./.env; set +a; }
 
 # A killed ROS process leaves its 16 MB shared-memory segment behind, and with
 # ipc: host they pile up across runs until /dev/shm is full. Fast DDS then quietly
@@ -83,7 +86,8 @@ stop() {
 
 # On the host: the tunnel needs the user's ssh keys, and the feed is on host networking anyway.
 tunnel() {
-    exec ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -R 8790:localhost:8790 ${XR_SSH:-xr.r1a.nl}
+    : "${XR_SSH:?set XR_SSH in .env to the ssh arguments of the xr.r1a.nl server, e.g. -i key user@host}"
+    exec ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -R 8790:localhost:8790 ${XR_SSH}
 }
 
 start() {

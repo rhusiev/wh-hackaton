@@ -131,8 +131,8 @@ view cone from it drawn through walls. The world is the one the feed names;
 The page needs HTTPS and the glasses need to reach the feed, so both go through a
 server: Caddy serves `web/` and proxies `/feed` to port 8790, which
 `./run.sh start xr` (or `./run.sh glasses` alone) forwards from this machine
-over ssh to `xr.r1a.nl`. `XR_SSH` overrides the ssh arguments, e.g.
-`XR_SSH="-i ~/.ssh/key user@server" ./run.sh start xr`.
+over ssh to the server. The ssh arguments go into `XR_SSH` in `.env`, which
+git ignores: `XR_SSH="-i ~/.ssh/key user@server"`.
 
 Then Browser on the glasses (Lens Explorer, it does not come up in search),
 open the site and tap Enter AR. A desktop browser shows the same scene without
