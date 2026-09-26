@@ -49,8 +49,8 @@ def generate_launch_description() -> LaunchDescription:
         # The known-pose grid mapper; with slam:=true RTAB-Map publishes /map instead.
         DeclareLaunchArgument("mapper", default_value="true", choices=["true", "false"]),
         DeclareLaunchArgument("ar", default_value="true", choices=["true", "false"]),
-        # The drone's colour image in the AR payload, for ./run.sh preview --camera
-        # drone. Real glasses do not want it: the wearer is not looking at a screen.
+        # The drone's colour image and the detector's boxes in the AR payload, for
+        # ./run.sh preview --camera drone and the glasses' left-hand camera view.
         DeclareLaunchArgument("ar_video", default_value="true", choices=["true", "false"]),
         # Only the truth detector needs it: it reads that world's people.
         DeclareLaunchArgument("world", default_value="warehouse"),

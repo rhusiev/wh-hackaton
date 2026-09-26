@@ -45,9 +45,13 @@ const HAND_MINIMAP_SIZE = 0.25;
 // Markers on the minimap are drawn this much larger than life, or a person would be 7 mm wide.
 const MINIMAP_MARKERS = 3;
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+// No antialiasing: in AR it multisamples both eyes' framebuffers every frame, and the glasses run hot.
+const renderer = new THREE.WebGLRenderer({ alpha: true });
 renderer.xr.enabled = true;
 renderer.xr.setReferenceSpaceType("local");
+if (params.has("scale")) {
+  renderer.xr.setFramebufferScaleFactor(Number(params.get("scale")));
+}
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 100);
@@ -143,7 +147,9 @@ async function loadLayout(name) {
     new THREE.LineBasicMaterial({ color: 0x66ccff, transparent: true, opacity: 0.35 })));
   figures.clear();
   views[0].drone.add(droneModel(drone));
-  await Promise.all(people.map(figure));
+  if (params.get("figures") !== "0") {
+    await Promise.all(people.map(figure));
+  }
 }
 const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStandardMaterial({ color: 0x3a3f44 }));
 solid.add(floor);
@@ -155,24 +161,31 @@ const tabletop = simFrame(1, new THREE.Vector3());
 minimap.add(tabletop);
 
 const material = colour => new THREE.MeshStandardMaterial({ color: colour, transparent: true });
-const PERSON = { confirmed: 0xff3333, lost: 0xbbbbbb };
+const PERSON = { confirmed: 0xff3333, lost: 0xbbbbbb, seen: 0xffdd00 };
+// A person seen this recently counts as in the drone's view now.
+const SEEN_WITHIN = 1.5;
 
 function personMarker(lifeSize) {
   const body = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 1), material(PERSON.confirmed));
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.5, 12, 8), material(PERSON.confirmed));
-  body.material.wireframe = head.material.wireframe = lifeSize;
+  for (const part of [body, head]) {
+    part.material.wireframe = lifeSize;
+    part.material.depthTest = !lifeSize;
+  }
   const group = new THREE.Group();
   group.add(body, head);
   return { group, body, head };
 }
 
-// Life size, the cone floats above the model and, like its edges, shows through walls.
+// The cone's tip is on the drone and it widens the way the camera looks. Life size, it is see-through and shows through
+// walls, like the model's edges.
 function droneMesh({ lifeSize, markers }) {
-  const cone = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.8, 12), material(0x33aaff));
-  cone.rotation.z = -Math.PI / 2;
+  const cone = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.8, 12).translate(0, -0.4, 0), material(0x33aaff));
+  cone.rotation.z = Math.PI / 2;
   cone.scale.setScalar(markers);
-  cone.position.z = lifeSize ? 1 : 0;
   cone.material.depthTest = !lifeSize;
+  cone.material.depthWrite = !lifeSize;
+  cone.material.opacity = lifeSize ? 0.3 : 1;
   const holder = new THREE.Group();
   holder.add(cone);
   return holder;
@@ -188,7 +201,7 @@ for (const view of views) {
   view.root.add(view.drone);
 }
 
-const wearer = new THREE.Mesh(new THREE.SphereGeometry(0.3 * MINIMAP_MARKERS), material(0xffdd00));
+const wearer = new THREE.Mesh(new THREE.SphereGeometry(0.3 * MINIMAP_MARKERS), material(0xff66ff));
 tabletop.add(wearer);
 
 const mapCanvas = document.createElement("canvas");
@@ -253,13 +266,17 @@ function showPeople(view, targets) {
       head.scale.setScalar(t.head.size * view.wide);
     }
     for (const part of [body, head]) {
-      part.material.color.setHex(PERSON[t.status] ?? PERSON.confirmed);
+      part.material.color.setHex(t.age < SEEN_WITHIN ? PERSON.seen : PERSON[t.status] ?? PERSON.confirmed);
       part.material.opacity = t.status === "lost" ? 0.4 : 1;
     }
   }
   for (const [id, marker] of view.people) {
     if (!seen.has(id)) {
       view.root.remove(marker.group);
+      for (const part of [marker.body, marker.head]) {
+        part.geometry.dispose();
+        part.material.dispose();
+      }
       view.people.delete(id);
     }
   }
@@ -270,7 +287,42 @@ let messages = 0;
 let connected = false;
 let resets = 0;
 
+const CAMERA_WIDTH = 0.24;
+const cameraAt = new THREE.Vector3(0.4, -0.1, -0.7);
+const cameraCanvas = document.createElement("canvas");
+const cameraTexture = new THREE.CanvasTexture(cameraCanvas);
+const cameraPanel = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: cameraTexture }));
+cameraPanel.visible = false;
+scene.add(cameraPanel);
+const frame = new Image();
+let boxes = [];
+frame.onload = () => {
+  if (cameraCanvas.width !== frame.width || cameraCanvas.height !== frame.height) {
+    cameraCanvas.width = frame.width;
+    cameraCanvas.height = frame.height;
+    cameraTexture.dispose();
+    cameraPanel.scale.set(CAMERA_WIDTH, CAMERA_WIDTH * frame.height / frame.width, 1);
+  }
+  const ctx = cameraCanvas.getContext("2d");
+  ctx.drawImage(frame, 0, 0);
+  ctx.lineWidth = 3;
+  for (const [left, top, right, bottom, label] of boxes) {
+    ctx.strokeStyle = label === "head" ? "#ffaa00" : "#ff3333";
+    ctx.strokeRect(left * frame.width, top * frame.height, (right - left) * frame.width, (bottom - top) * frame.height);
+  }
+  cameraTexture.needsUpdate = true;
+};
+
+// Decoded only while it is on show: a frame is a JPEG every feed message.
+function showCamera(payload) {
+  if (payload.view && cameraPanel.visible) {
+    boxes = payload.view_boxes ?? [];
+    frame.src = `data:image/jpeg;base64,${payload.view}`;
+  }
+}
+
 function show(payload) {
+  showCamera(payload);
   if (layoutName === null && payload.world) {
     loadLayout(payload.world);
   }
@@ -287,9 +339,14 @@ function show(payload) {
   }
 }
 
+let socket = null;
+let video = false;
 function connect() {
-  const socket = new WebSocket(feedUrl);
-  socket.onopen = () => { connected = true; };
+  socket = new WebSocket(feedUrl);
+  socket.onopen = () => {
+    connected = true;
+    socket.send(JSON.stringify({ video, map: "changed" }));
+  };
   socket.onmessage = event => {
     last = JSON.parse(event.data);
     messages++;
@@ -313,54 +370,85 @@ if (feedUrl !== "none") {
 const head = new THREE.Vector3();
 const headInSim = new THREE.Vector3();
 
-// Hands arrive in either controller slot, so the right one is told by its handedness.
-let rightHand = null;
+// Hands arrive in either controller slot, so each is told by its handedness.
+const hands = {};
 for (const slot of [0, 1]) {
   const hand = renderer.xr.getHand(slot);
-  hand.addEventListener("connected", event => {
-    if (event.data.handedness === "right") {
-      rightHand = hand;
-    }
-  });
+  hand.addEventListener("connected", event => { hands[event.data.handedness] = hand; });
   hand.addEventListener("disconnected", () => {
-    if (rightHand === hand) {
-      rightHand = null;
+    for (const side in hands) {
+      if (hands[side] === hand) {
+        delete hands[side];
+      }
     }
   });
   scene.add(hand);
 }
 
-const palmCentre = new THREE.Vector3();
-const palmUp = new THREE.Vector3();
-const palmTurn = new THREE.Quaternion();
-const PALM_ON = 0.7;
-const PALM_OFF = 0.4;
-const PALM_HOLD_MS = 500;
-let onPalm = false;
-let palmSeen = -Infinity;
+const GESTURE_ON = 0.7;
+const GESTURE_OFF = 0.4;
+const GESTURE_HOLD_MS = 500;
+const jointTurn = new THREE.Quaternion();
+const toHead = new THREE.Vector3();
 
-// In XR the minimap rides only on a right hand held palm up; the desktop has it in front.
-// WebXR points a joint's -y out of the palm. Hysteresis and a short hold keep tracking wobble
-// from throwing the minimap back into the air.
-function placeMinimap(now) {
-  const joint = rightHand?.joints["middle-finger-metacarpal"];
-  if (joint?.visible) {
-    const up = palmUp.set(0, -1, 0).applyQuaternion(joint.getWorldQuaternion(palmTurn)).y;
-    if (up > (onPalm ? PALM_OFF : PALM_ON)) {
-      onPalm = true;
-      palmSeen = now;
-      joint.getWorldPosition(palmCentre);
-    }
+// A hand held a certain way, told from the palm centre joint, where WebXR points -y out of the
+// palm and -z along the fingers. Hysteresis and a short hold keep tracking wobble from dropping it.
+class Gesture {
+  constructor(side, score) {
+    Object.assign(this, { side, score, held: false, seen: -Infinity, at: new THREE.Vector3(),
+                          palm: new THREE.Vector3(), fingers: new THREE.Vector3() });
   }
-  onPalm &&= now - palmSeen < PALM_HOLD_MS;
-  minimap.visible = onPalm || !renderer.xr.isPresenting;
-  if (onPalm) {
-    minimap.position.set(palmCentre.x, palmCentre.y + 0.06, palmCentre.z);
+
+  update(now) {
+    const joint = hands[this.side]?.joints["middle-finger-metacarpal"];
+    if (joint?.visible) {
+      joint.getWorldQuaternion(jointTurn);
+      this.palm.set(0, -1, 0).applyQuaternion(jointTurn);
+      this.fingers.set(0, 0, -1).applyQuaternion(jointTurn);
+      joint.getWorldPosition(this.at);
+      toHead.subVectors(head, this.at).normalize();
+      if (this.score() > (this.held ? GESTURE_OFF : GESTURE_ON)) {
+        this.held = true;
+        this.seen = now;
+      }
+    }
+    this.held &&= now - this.seen < GESTURE_HOLD_MS;
+    return this.held;
+  }
+}
+
+// The minimap rides on a right hand held palm up.
+const palmUp = new Gesture("right", function () { return this.palm.y; });
+// The drone's view stands in front of a left hand held upright, palm away.
+const palmAway = new Gesture("left", function () { return Math.min(this.fingers.y, -this.palm.dot(toHead)); });
+
+// Outside XR there are no hands, so the desktop shows both in front.
+function placeMinimap(now) {
+  const held = palmUp.update(now);
+  minimap.visible = held || !renderer.xr.isPresenting;
+  if (held) {
+    minimap.position.copy(palmUp.at).add(new THREE.Vector3(0, 0.06, 0));
     minimap.scale.setScalar(HAND_MINIMAP_SIZE / MINIMAP_SIZE);
   } else {
     minimap.position.copy(minimapAt);
     minimap.scale.setScalar(1);
   }
+}
+
+function placeCamera(now) {
+  const held = palmAway.update(now);
+  const wanted = held || !renderer.xr.isPresenting;
+  if (wanted !== video && connected) {
+    video = wanted;
+    socket.send(JSON.stringify({ video }));
+  }
+  cameraPanel.visible = wanted && Boolean(last?.view);
+  if (held) {
+    cameraPanel.position.copy(palmAway.at).addScaledVector(toHead.subVectors(head, palmAway.at).normalize(), 0.05);
+  } else {
+    cameraPanel.position.copy(cameraAt);
+  }
+  cameraPanel.lookAt(head);
 }
 
 function status() {
@@ -372,7 +460,7 @@ function status() {
     for (const t of last.targets) {
       counts[t.status] = (counts[t.status] ?? 0) + 1;
     }
-    lines.push(`people: ${JSON.stringify(counts)}`, `map: ${last.map ? `${last.map.w}x${last.map.h}` : "none"}`);
+    lines.push(`people: ${JSON.stringify(counts)}`, `map: ${mapKey || "none"}`);
   }
   lines.push(`you in the sim: ${headInSim.x.toFixed(1)}, ${headInSim.y.toFixed(1)}`, `tracking resets: ${resets}`);
   document.getElementById("status").textContent = lines.join("\n");
@@ -385,6 +473,7 @@ renderer.setAnimationLoop(now => {
   headInSim.copy(pose.getWorldPosition(head)).applyMatrix4(simOfXr);
   wearer.position.set(headInSim.x, headInSim.y, 0);
   placeMinimap(now);
+  placeCamera(now);
   renderer.render(scene, camera);
 });
 

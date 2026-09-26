@@ -1,4 +1,4 @@
-"""Explore, then keep every person found in view from a few stations.
+"""Explore, then keep every person found in view from a few stations, and keep looking around.
 
 After FrontierExplorer has mapped the place, the confirmed people are split
 between as few stations as possible. A station is a reachable spot and a heading
@@ -14,6 +14,9 @@ hovers at each, so the tracker keeps seeing everyone:
 - a new candidate is inspected as during exploration
 - whenever the people or their positions change, the stations are planned again
 - a station it could not reach is left out of the next plans
+- before each loop it goes and looks at one place it has not had in view this round,
+  and once it has looked everywhere a new round starts, so a person who walked off
+  unseen, or one it never found, turns up again
 
 stations() is the planner on its own; Watch flies it.
 """
@@ -97,8 +100,8 @@ class Watch:
     @staticmethod
     def add_arguments(parser: argparse.ArgumentParser) -> None:
         FrontierExplorer.add_arguments(parser)
-        parser.add_argument("--watch-time", type=float, default=600.0,
-                            help="how long to keep watching after exploring, s")
+        parser.add_argument("--watch-time", type=float, default=math.inf,
+                            help="how long to keep watching after exploring, s; forever by default")
         parser.add_argument("--dwell", type=float, default=5.0,
                             help="hover at each station, s")
 
@@ -111,18 +114,18 @@ class Watch:
     def run(self, flight: Flight) -> None:
         self.explorer.run(flight)
         log = flight.get_logger()
-        deadline = flight.get_clock().now().nanoseconds + int(self.watch_time * 1e9)
-        while flight.get_clock().now().nanoseconds < deadline:
+        deadline = flight.get_clock().now().nanoseconds / 1e9 + self.watch_time
+        while flight.get_clock().now().nanoseconds / 1e9 < deadline:
             self.explorer.look(flight)
+            self.patrol(flight)
+            self.follow_up(flight)
             watched = self.confirmed(flight)
             self.searched -= {p.id for p in watched}  # found again, so lost again is new
-            if not watched:
-                log.info("nobody to watch")
-                break
             tour, unseen = stations(flight.grid(), flight.here(),
                                     [(p.id, p.x, p.y) for p in watched], CLEARANCE, self.unreachable)
-            log.info(f"watching {len(watched)} people from {len(tour)} station(s)"
-                     + (f", no view of {unseen}" if unseen else ""))
+            if watched:
+                log.info(f"watching {len(watched)} people from {len(tour)} station(s)"
+                         + (f", no view of {unseen}" if unseen else ""))
             for station in tour:
                 if not self.visit(flight, station):
                     log.warn(f"could not reach station at ({station.position[0]:.1f}, "
@@ -133,13 +136,23 @@ class Watch:
                     if person.id in station.people and person.status == "confirmed" and person.age > self.dwell:
                         log.info(f"person {person.id} not seen from the station, looking closer")
                         frontier.look_at(flight, (person.x, person.y), self.dwell)
-                self.explorer.inspect(flight)
-                for person in [p for p in flight.people()
-                               if p.status == "lost" and p.id not in self.searched]:
-                    self.search(flight, person)
+                self.follow_up(flight)
                 if self.changed(watched, self.confirmed(flight)):
                     break
         log.info("watch done, holding")
+
+    def patrol(self, flight: Flight) -> None:
+        """Look at the place most worth it that has not been in view this round; then start a new round."""
+        if not self.explorer.look_at_gap(flight):
+            flight.get_logger().info("everything looked at, looking around again")
+            self.explorer.forget()
+            self.explorer.look_at_gap(flight)
+
+    def follow_up(self, flight: Flight) -> None:
+        """Inspect new candidates and look for the people newly lost."""
+        self.explorer.inspect(flight)
+        for person in [p for p in flight.people() if p.status == "lost" and p.id not in self.searched]:
+            self.search(flight, person)
 
     @staticmethod
     def confirmed(flight: Flight) -> list[Person]:

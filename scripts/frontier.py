@@ -399,6 +399,11 @@ class FrontierExplorer:
         self.look(flight)
         return True
 
+    def forget(self) -> None:
+        """Count everything as unseen again, for another round of looking."""
+        self.coverage = Coverage(LOOK_RANGE, HALF_FOV)
+        self.attempted.clear()
+
     def inspect(self, flight: Flight) -> None:
         """Look at unsure candidates, nearest first, until none is left worth a look."""
         while True:

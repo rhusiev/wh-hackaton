@@ -207,9 +207,11 @@ This is the part the idea actually needs, and it is four pieces:
    occupied cells into a wireframe of the room, which `--camera none` also asks
    for. `--camera N` puts a webcam behind the overlay instead,
    and `--camera drone` the aircraft's own colour image, which the bridge sends
-   as a JPEG in `"view"` when launched with `--video` (`ar_video:=false` turns
-   that off - real glasses do not want it, the wearer is not looking at a
-   screen). Behind the drone's image the overlay is drawn from the drone's pose,
+   as a JPEG in `"view"` when launched with `--video`, with the detector's
+   last boxes in `"view_boxes"` (`ar_video:=false` turns that off). The glasses
+   page asks for it only while its camera panel is up, by sending `{"video": true}`, and
+   asks with `{"map": "changed"}` for the map only when it changes: an idle feed
+   is ~100 bytes a message instead of ~70 KB, which the glasses parse 10 times a second. Behind the drone's image the overlay is drawn from the drone's pose,
    camera pitch and 68.8 deg field of view rather than the wearer's, so walking
    does nothing there.
    Two resizable windows, the glasses view and the minimap; WASD walks the
@@ -296,6 +298,11 @@ clear line of sight on the map. It flies the stations in a loop and hovers 5 s
    and started over comes back under a new one
 3. Whenever the confirmed people change or one moves more than 1 m, the
    stations are planned again. A station it could not reach is left out
+4. Before each loop it goes and looks at one place it has not had in view
+   this round, the one `look_at_gap` finds most worth it. Once it has looked
+   everywhere, a new round starts. This finds a person who walked off unseen,
+   or one exploring missed. It watches until stopped, unless `--watch-time`
+   says otherwise
 
 `./run.sh clearance` measures from ground truth how close the drone gets to the
 box collisions in the world. At 2.5 m altitude a test run touched rack decks 4

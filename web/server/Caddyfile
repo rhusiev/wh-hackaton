@@ -3,6 +3,8 @@ https://xr.r1a.nl:443 {
         reverse_proxy host.docker.internal:8791
     }
     handle {
+        # Browsers recheck, so a reload always gets the deployed page.
+        header Cache-Control no-cache
         root * /srv/xr
         file_server
     }

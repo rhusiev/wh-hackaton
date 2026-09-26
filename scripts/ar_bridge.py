@@ -15,12 +15,15 @@ Payload, all lengths in metres in the map frame:
                   "score": 0.78, "confidence": 0.95, "age": 1.3, "hits": 12}],
      "map": {"res": 0.2, "w": 200, "h": 200, "x0": -20.0, "y0": -20.0,
              "cells": "<base64 of w*h bytes, 0 free / 1 occupied / 2 unknown>"},
-     "view": "<base64 JPEG of the drone's colour image, only with --video>"}
+     "view": "<base64 JPEG of the drone's colour image, only with --video>",
+     "view_boxes": [[0.41, 0.2, 0.52, 0.9, "person"], ...]}
 
 A target is a box standing on the floor: centre x, y, z and height h. "head" is
 present once the detector has seen a head for it. "status" is "confirmed", or
 "lost" for a person no longer where they were last seen, "age" seconds ago. "map" is present only while
-something publishes /map.
+something publishes /map. A client can send {"video": false} to stop "view", and {"map": "changed"} to get
+"map" only when it has changed since its last one; the glasses do both. "view_boxes" goes with "view": the detector's last frame, each box as left, top,
+right and bottom in fractions of the image, and its class.
 
 The fusing is tracker.py's NearestTracker; the tracker parameter ("module:Class" or
 "path/to/file.py:Class") swaps it for anything with the same update and tracks.
@@ -89,6 +92,7 @@ class ArBridge(Node):
         self.occupancy: Grid | None = None
         self.info: CameraInfo | None = None
         self.view_jpeg: str | None = None
+        self.view_boxes: list[list] = []
         self.depth: np.ndarray | None = None
         self.last_grid = 0.0
         self.last_tracks = 0.0
@@ -145,6 +149,9 @@ class ArBridge(Node):
                                              hypothesis.score, None)
         for det_id, sighting in sightings.items():
             sighting.head = heads.get(det_id)
+        if self.info is not None:
+            self.view_boxes = [box for det in msg.detections if det.results
+                               if (box := self.image_box(det)) is not None]
         view = self.view(rot, trans)
         now = self.now()
         with self.lock:
@@ -160,6 +167,18 @@ class ArBridge(Node):
         k = self.info.k
         return CameraView(rot, trans, (k[0], k[4], k[2], k[5]), (self.info.width, self.info.height),
                           self.occupancy, self.depth)
+
+    def image_box(self, det) -> list | None:
+        """A detection's box in fractions of the image; the bbox is in the optical frame, y down."""
+        c, size = det.bbox.center.position, det.bbox.size
+        if c.z <= 0:
+            return None
+        fx, _, cx, _, fy, cy = self.info.k[:6]
+        w, h = self.info.width, self.info.height
+        u, v = fx * c.x / c.z + cx, fy * c.y / c.z + cy
+        du, dv = fx * size.x / c.z / 2, fy * size.y / c.z / 2
+        return [round((u - du) / w, 3), round((v - dv) / h, 3), round((u + du) / w, 3),
+                round((v + dv) / h, 3), det.results[0].hypothesis.class_id]
 
     def on_colour(self, msg: Image) -> None:
         """The drone's own view, encoded once here rather than per connected client."""
@@ -183,17 +202,21 @@ class ArBridge(Node):
         self.occupancy = Grid.from_msg(msg)
         cells = self.occupancy.cells
         packed = np.where(cells == UNKNOWN, 2, np.where(cells >= OCCUPIED, 1, 0)).astype(np.uint8)
-        with self.lock:
-            self.grid = {
-                "res": round(msg.info.resolution, 4),
-                "w": msg.info.width,
-                "h": msg.info.height,
-                "x0": round(msg.info.origin.position.x, 3),
-                "y0": round(msg.info.origin.position.y, 3),
-                "cells": base64.b64encode(packed.tobytes()).decode(),
-            }
+        grid = {
+            "res": round(msg.info.resolution, 4),
+            "w": msg.info.width,
+            "h": msg.info.height,
+            "x0": round(msg.info.origin.position.x, 3),
+            "y0": round(msg.info.origin.position.y, 3),
+            "cells": base64.b64encode(packed.tobytes()).decode(),
+        }
+        # Kept as the same object while unchanged, which is how a client knows it has it.
+        if grid != self.grid:
+            with self.lock:
+                self.grid = grid
 
-    def snapshot(self) -> str:
+    def snapshot(self, video: bool = True, grid_after: dict | None = None) -> str:
+        """grid_after, if given, is the last map a client has, left out when there is no newer one."""
         now = self.now()
         payload = {"t": round(now, 2), "world": self.world, "drone": None, "targets": []}
         try:
@@ -209,10 +232,11 @@ class ArBridge(Node):
 
         with self.lock:
             payload["targets"] = [t for t in self.tracker.tracks(now) if t["status"] != "candidate"]
-            if self.grid is not None:
+            if self.grid is not None and self.grid is not grid_after:
                 payload["map"] = self.grid
-        if self.view_jpeg is not None:
+        if video and self.view_jpeg is not None:
             payload["view"] = self.view_jpeg
+            payload["view_boxes"] = self.view_boxes
         return json.dumps(payload, separators=(",", ":"))
 
 
@@ -225,12 +249,24 @@ async def serve(node: ArBridge, host: str, port: int, rate: float) -> None:
 
     async def handler(socket):
         node.get_logger().info(f"AR client connected: {socket.remote_address}")
+        options = {"video": True, "map": "always"}
+
+        async def listen():
+            async for message in socket:
+                options.update(json.loads(message))
+
+        listener = asyncio.create_task(listen())
+        sent_grid = None
         try:
             while True:
-                await socket.send(node.snapshot())
+                grid = node.grid if options["map"] == "changed" else None
+                await socket.send(node.snapshot(options["video"], sent_grid))
+                sent_grid = grid
                 await asyncio.sleep(1.0 / rate)
         except Exception:
             node.get_logger().info("AR client disconnected")
+        finally:
+            listener.cancel()
 
     async with websockets.serve(handler, host, port):
         node.get_logger().info(f"AR websocket on ws://{host}:{port}")
@@ -244,7 +280,7 @@ def main() -> None:
     parser.add_argument("--rate", type=float, default=10.0)
     parser.add_argument("--world", default=default_world(), help="named in the payload, for the glasses' layout")
     parser.add_argument("--video", action="store_true",
-                        help="also send the drone's colour image, for ./run.sh preview")
+                        help="also send the drone's colour image, for ./run.sh preview and the glasses")
     known, ros_args = parser.parse_known_args()
 
     rclpy.init(args=ros_args)
