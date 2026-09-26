@@ -10,3 +10,6 @@ __pycache__/
 .venv/
 .vscode/
 .idea/
+
+# ./run.sh start logs
+.run/

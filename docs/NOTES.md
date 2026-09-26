@@ -786,3 +786,21 @@ wrist orientation, and a minimap tied to it jumped back into the air. A palm hel
 toward the glasses tracks much better, so the hand minimap uses the right palm up,
 reads the orientation from the middle-finger metacarpal rather than the wrist, and
 rides out short dropouts
+
+## `pgrep -f` inside `bash -c` matches its own shell
+
+`docker compose exec sim bash -c 'pgrep -f "gz sim" || ...'` always finds a
+match: the `bash -c` stays alive for the `||`, and its own command line holds the
+pattern. `run.sh` brackets one letter of each pattern (`[g]z sim`), which still
+matches `gz sim` but not the text `[g]z sim`.
+
+## `docker compose exec` fails silently in a script without `-T`
+
+With no terminal on stdin, `docker compose exec` without `-T` exits with "the
+input device is not a TTY", and with stderr dropped that looks like an empty
+answer. `run.sh` adds `-T` whenever stdin is not a terminal.
+
+## `ros2 topic echo --field` prints Python's `True`
+
+`ros2 topic echo --once --field connected /mavros/state` prints `True`, not
+`true`, followed by `---`.
