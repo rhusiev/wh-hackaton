@@ -5,7 +5,7 @@ services:
       args:
         ARDUPILOT_REF: ${ARDUPILOT_REF:-Copter-4.6.3}
         WITH_RTABMAP: ${WITH_RTABMAP:-1}
-    image: ghcr.io/rhusiev/wh-hackaton-sim:latest
+    image: ghcr.io/uc-ufo/wh-hackathon-sim:latest
     container_name: wh-sim
     tty: true
     stdin_open: true
@@ -25,7 +25,7 @@ services:
       - NVIDIA_VISIBLE_DEVICES=all
       - __GLX_VENDOR_LIBRARY_NAME=nvidia
       - __NV_PRIME_RENDER_OFFLOAD=1
-      - FASTRTPS_DEFAULT_PROFILES_FILE=/workspace/wh-hackaton/config/fastdds.xml
+      - FASTRTPS_DEFAULT_PROFILES_FILE=/workspace/wh-hackathon/config/fastdds.xml
 
     # The AR preview's --camera. Defaulting to /dev/null keeps the container
     # startable on a machine with no camera, where opening it simply fails.
@@ -38,7 +38,7 @@ services:
       - "${VIDEO_GID:-44}"
 
     volumes:
-      - .:/workspace/wh-hackaton
+      - .:/workspace/wh-hackathon
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ${XAUTHORITY:-$HOME/.Xauthority}:/home/ubuntu/.Xauthority:ro
 

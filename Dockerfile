@@ -92,7 +92,7 @@ RUN pip3 install --no-cache-dir --break-system-packages onnxruntime
 ENV PATH=${ARDUPILOT_HOME}/Tools/autotest:${ARDUPILOT_HOME}/build/sitl/bin:$PATH
 ENV GZ_SIM_SYSTEM_PLUGIN_PATH=${ARDUPILOT_GAZEBO_HOME}/lib/ardupilot_gazebo
 ENV GZ_SIM_RESOURCE_PATH=${ARDUPILOT_GAZEBO_HOME}/share/ardupilot_gazebo/models:${ARDUPILOT_GAZEBO_HOME}/share/ardupilot_gazebo/worlds
-ENV WORKSPACE=/workspace/wh-hackaton
+ENV WORKSPACE=/workspace/wh-hackathon
 
 # profile.d, not ~/.bashrc: Ubuntu's stock .bashrc returns early for
 # non-interactive shells, so `bash -lc "ros2 ..."` would never see ROS.

@@ -1,4 +1,4 @@
-# wh-hackaton - wallhack hackathon
+# wh-hackathon - wallhack hackathon
 
 A wallhack for AR glasses: a scout drone looks behind the walls and racks you
 can't see past, and Spectacles draw the people it found on a minimap.
@@ -20,8 +20,8 @@ Everything runs inside one Docker container
 ## Launch it
 
 ```bash
-git clone https://github.com/rhusiev/wh-hackaton.git
-cd wh-hackaton
+git clone https://github.com/UC-UFO/wh-hackathon.git
+cd wh-hackathon
 ./run.sh pull     # once, downloads the ready image (~7 GB)
 ./run.sh up       # start the container in the background
 ```

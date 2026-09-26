@@ -382,7 +382,7 @@ line at the end - rebuilds ArduPilot and ardupilot_gazebo from scratch. On a
 nearly full disk that rebuild is what runs out of space, and a killed build
 leaves its cache records "in use" and unprunable until the daemon restarts. For
 a metadata-only fix, layer it on the existing image instead:
-`FROM wh-hackaton-sim:latest` plus the `ENV`, tagged back to the same name.
+`FROM wh-hackathon-sim:latest` plus the `ENV`, tagged back to the same name.
 
 ## Gazebo's default collision checker is most of the warehouse's cost
 
